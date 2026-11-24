@@ -1,0 +1,32 @@
+[project]
+name = "bmad-studio"
+version = "0.1.0"
+description = "Web UI ครอบ BMAD Method ของ Veda: config pipeline, agent และ flow ต่อโปรเจกต์"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "fastapi==0.165.0",
+    "uvicorn==0.54.0",
+    "pydantic==2.14.4",
+    "pydantic-settings==2.16.3",
+]
+
+[project.scripts]
+bmad-studio = "bmad_studio.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest==9.2.0",
+    "httpx==0.28.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bmad_studio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
