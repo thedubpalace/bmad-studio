@@ -1,0 +1,71 @@
+/* Design tokens ที่เดียวของ bmad-studio (design.md — Color System, Typography, Spacing).
+   OKLCH เป็นค่าหลัก; hex ด้านล่างคำนวณจาก OKLCH ไว้ล่วงหน้าเป็น fallback ของเบราว์เซอร์ที่ไม่รองรับ oklch(). */
+:root {
+  --bg-scrim: #060e188c;
+  --glass-fill: #15202d9e;
+  --glass-hairline: #f4f9ff24;
+  --surface-solid: #0f1822;
+  --surface-solid-2: #17212e;
+  --text: #eef2f7;
+  --text-2: #b7bec7;
+  --text-3: #9099a5;
+  --accent: #2e91ff;
+  --ok: #40d872;
+  --warn: #fea92f;
+  --danger: #ff5251;
+  --lock: #9d99ed;
+  --skip: #899098;
+  --on-fill: #060c13;
+  --diff-add-bg: #133c1f8c;
+  --diff-del-bg: #551f1d8c;
+
+  --font-ui: -apple-system, "SF Pro Text", Inter, system-ui, "Segoe UI", "Noto Sans Thai Looped", "Noto Sans Thai", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", monospace;
+  --fs-12: 0.75rem;
+  --fs-14: 0.875rem;
+  --fs-16: 1rem;
+  --fs-20: 1.25rem;
+  --fs-25: 1.5625rem;
+  --fs-31: 1.9375rem;
+  --lh-th: 1.65;
+  --lh-mono: 1.5;
+  --lh-heading: 1.3;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-12: 48px;
+  --s-16: 64px;
+
+  --radius: 14px;
+  --radius-sm: 10px;
+  --target: 44px;
+  --sidebar-w: 220px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --glass-blur: blur(22px) saturate(140%);
+}
+
+@supports (color: oklch(0 0 0)) {
+  :root {
+    --bg-scrim: oklch(0.16 0.025 255 / 0.55);
+    --glass-fill: oklch(0.24 0.03 255 / 0.62);
+    --glass-hairline: oklch(0.98 0.01 255 / 0.14);
+    --surface-solid: oklch(0.205 0.025 255);
+    --surface-solid-2: oklch(0.245 0.028 255);
+    --text: oklch(0.96 0.008 255);
+    --text-2: oklch(0.8 0.015 255);
+    --text-3: oklch(0.68 0.02 255);
+    --accent: oklch(0.66 0.19 255);
+    --ok: oklch(0.78 0.19 150);
+    --warn: oklch(0.8 0.16 70);
+    --danger: oklch(0.68 0.21 25);
+    --lock: oklch(0.72 0.12 285);
+    --skip: oklch(0.65 0.015 255);
+    --on-fill: oklch(0.15 0.02 255);
+    --diff-add-bg: oklch(0.32 0.07 150 / 0.55);
+    --diff-del-bg: oklch(0.32 0.08 25 / 0.55);
+  }
+}

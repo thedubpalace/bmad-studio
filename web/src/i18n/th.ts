@@ -1,0 +1,58 @@
+// ข้อความ UI ภาษาไทยทั้งหมดอยู่ที่นี่ที่เดียว (Conventions ใน architecture.md)
+export const th = {
+  appName: "bmad-studio",
+  nav: {
+    label: "เมนูหลัก",
+    skipToContent: "ข้ามไปเนื้อหา",
+    projects: "โปรเจกต์",
+    defaultFlow: "Flow เริ่มต้น",
+    agents: "Agent",
+    bmad: "BMAD",
+    changes: "การเปลี่ยนแปลง",
+    openReview: "เปิด /review",
+    openReviewHint: "เปิดหน้าอนุมัติ requirement ของ app-dashboard ในแท็บใหม่",
+    logout: "ออกจากระบบ",
+    signedInAs: "เข้าสู่ระบบเป็น",
+    roleAdmin: "ผู้ดูแล",
+    roleViewer: "ผู้ชม (อ่านอย่างเดียว)",
+  },
+  login: {
+    title: "เข้าสู่ระบบ bmad-studio",
+    subtitle: "ใช้ชื่อผู้ใช้และรหัสผ่านเดียวกับ app-dashboard",
+    username: "ชื่อผู้ใช้",
+    password: "รหัสผ่าน",
+    showPassword: "แสดงรหัสผ่าน",
+    hidePassword: "ซ่อนรหัสผ่าน",
+    submit: "เข้าสู่ระบบ",
+    submitting: "กำลังเข้าสู่ระบบ…",
+    invalid: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง",
+    rateLimited: (countdown: string) => `ลองผิดหลายครั้งเกินไป ลองใหม่ได้ในอีก ${countdown}`,
+    auditUnavailable: "ระบบบันทึกไม่ได้ ไม่มีการเปลี่ยนแปลง",
+    credentialsUnavailable: "ระบบตรวจรหัสผ่านไม่พร้อม ยังเข้าสู่ระบบไม่ได้",
+    generic: "เข้าสู่ระบบไม่สำเร็จ ลองใหม่อีกครั้ง",
+    required: "กรอกชื่อผู้ใช้และรหัสผ่าน",
+  },
+  session: {
+    expiredTitle: "หมดเวลาเข้าสู่ระบบ",
+    expiredBody: "เข้าสู่ระบบอีกครั้งเพื่อทำงานต่อ งานที่ยังไม่บันทึกในหน้านี้ยังอยู่",
+    csrfMismatch: "เซสชันไม่ตรงกัน โหลดหน้าใหม่",
+    reload: "โหลดหน้าใหม่",
+    loading: "กำลังโหลด…",
+  },
+  errors: {
+    offline: "เชื่อมต่อไม่ได้ ตรวจสอบเครือข่ายแล้วลองใหม่",
+    forbidden: "บัญชีนี้ไม่มีสิทธิ์แก้ไข",
+    unexpected: "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง",
+    retry: "ลองใหม่",
+  },
+  empty: {
+    projects: { title: "ยังไม่มีหน้ารายการโปรเจกต์", body: "สถานะ flow ต่อโปรเจกต์จะแสดงที่นี่" },
+    defaultFlow: { title: "ยังไม่มีตัวแก้ Flow เริ่มต้น", body: "การแก้ .veda/flow.default.yaml จะอยู่ที่นี่" },
+    agents: { title: "ยังไม่มีหน้ารายการ agent", body: "agent ใน .claude/agents จะแสดงที่นี่" },
+    bmad: { title: "ยังไม่มีภาพรวม BMAD", body: "เวอร์ชันและ skill ที่ติดตั้งจะแสดงที่นี่" },
+    changes: { title: "ยังไม่มีการแก้ไข", body: "ไฟล์ที่แก้ผ่านแอปนี้และสถานะ git จะแสดงที่นี่" },
+    notFound: { title: "ไม่พบหน้านี้", body: "เลือกเมนูเพื่อไปยังส่วนที่ต้องการ" },
+  },
+} as const;
+
+export type Th = typeof th;

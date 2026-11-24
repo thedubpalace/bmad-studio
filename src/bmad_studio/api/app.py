@@ -18,7 +18,9 @@ from bmad_studio.api import access_guard
 from bmad_studio.api.audit import AuditLog
 from bmad_studio.api.auth import LoginRateLimiter
 from bmad_studio.api.envelope import error_response
+from bmad_studio import __version__
 from bmad_studio.api.routes import session as session_routes
+from bmad_studio.api.routes import web as web_routes
 from bmad_studio.core.credentials import CredentialStore
 from bmad_studio.core.errors import StartupError, StudioError
 from bmad_studio.core.settings import DEFAULT_HOST, Settings, check_host, check_startup, get_settings
@@ -51,22 +53,26 @@ def _install_error_handlers(app: FastAPI) -> None:
         return error_response(500, "internal_error", "เกิดข้อผิดพลาดภายในระบบ")
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, check: bool = True) -> FastAPI:
+    """สร้าง app; ``check=False`` ใช้เฉพาะการ export OpenAPI (ไม่รับ request จริง)."""
     settings = settings or get_settings()
-    check_startup(settings)
-    app = FastAPI(title="bmad-studio", docs_url=None, redoc_url=None, openapi_url=None)
+    if check:
+        check_startup(settings)
+    app = FastAPI(title="bmad-studio", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
     app.state.credentials = CredentialStore(settings.credentials_env_file)
     app.state.rate_limiter = LoginRateLimiter(settings.login_rate_attempts, settings.login_rate_window_seconds)
     app.state.audit = AuditLog(settings.runtime_dir)
     _install_error_handlers(app)
     access_guard.install(app)
-    app.include_router(session_routes.router)
 
     @app.get("/health", include_in_schema=False)
     async def health() -> dict[str, bool]:
         return {"ok": True}
 
+    app.include_router(session_routes.router)
+    web_routes.mount_assets(app, settings.web_dist)
+    web_routes.install_shell(app)  # ต้องอยู่ท้ายสุด: catch-all ของ SPA shell
     return app
 
 

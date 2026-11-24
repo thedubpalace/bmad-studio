@@ -50,7 +50,8 @@ def test_login_sets_signed_cookie_and_returns_csrf(settings: Settings) -> None:
     assert len(client.cookies.get(auth.COOKIE).strip('"').split("|")) == 5
 
     session = client.get("/api/session").json()["data"]
-    assert session == {"authenticated": True, "username": USERNAME, "role": "admin", "csrf": data["csrf"]}
+    assert session == {"authenticated": True, "username": USERNAME, "role": "admin", "csrf": data["csrf"],
+                       "review_url": settings.review_url}
 
 
 def test_cookie_secure_flag_when_configured(settings: Settings) -> None:

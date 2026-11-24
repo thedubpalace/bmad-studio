@@ -21,19 +21,37 @@ WRITE_PATH = "/api/_test/write"
 READ_PATH = "/api/_test/read"
 
 
+def keep_shell_last(app: FastAPI) -> None:
+    """test routes are added after the SPA catch-all; move the catch-all back to the end."""
+    app.router.routes.sort(key=lambda route: getattr(route, "path", "") == "/{path:path}")
+
+
+def _walk(routes: list, prefix: str = ""):
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield prefix, route
+        nested = getattr(route, "original_router", None)  # FastAPI's _IncludedRouter wrapper
+        if nested is not None:
+            sub_prefix = getattr(getattr(route, "include_context", None), "prefix", "") or ""
+            yield from _walk(nested.routes, prefix + sub_prefix)
+
+
 def registered_routes(app: FastAPI) -> list[tuple[str, str]]:
     pairs = []
-    for route in app.routes:
-        if isinstance(route, APIRoute):
-            for method in sorted(route.methods - {"HEAD"}):
-                pairs.append((method, route.path))
+    for prefix, route in _walk(app.router.routes):
+        for method in sorted(route.methods - {"HEAD"}):
+            pairs.append((method, prefix + route.path))
     return pairs
 
 
 def test_every_registered_route_has_a_rule(settings: Settings) -> None:
     app = create_app(settings)
+    pairs = registered_routes(app)
+    # the walker must see routes inside included routers, otherwise this test proves nothing
+    assert {("POST", "/api/login"), ("GET", "/api/session"), ("POST", "/api/logout"),
+            ("GET", "/health"), ("GET", "/{path:path}")} <= set(pairs)
     templates = {(rule.method, rule.template) for rule in access_policy.RULES}
-    missing = [pair for pair in registered_routes(app) if pair not in templates]
+    missing = [pair for pair in pairs if pair not in templates]
     assert missing == [], f"routes without an access rule: {missing}"
 
 
@@ -69,6 +87,7 @@ def app(settings: Settings, target: Path, monkeypatch: pytest.MonkeyPatch) -> Fa
     app.add_api_route(WRITE_PATH, write, methods=["POST"])
     app.add_api_route(READ_PATH, read, methods=["GET"])
     app.add_api_route("/api/_test/unlisted", write, methods=["POST"])
+    keep_shell_last(app)
     monkeypatch.setattr(access_policy, "RULES", [
         *access_policy.RULES,
         access_policy.Rule("POST", WRITE_PATH, access_policy.STUDIO_WRITE),
@@ -126,6 +145,7 @@ def test_viewer_is_forbidden_for_read_and_write(settings: Settings, target: Path
     app = create_app(viewer_settings)
     app.add_api_route(WRITE_PATH, lambda: target.write_text("changed", encoding="utf-8"), methods=["POST"])
     app.add_api_route(READ_PATH, lambda: {"v": 1}, methods=["GET"])
+    keep_shell_last(app)
     monkeypatch.setattr(access_policy, "RULES", [
         *access_policy.RULES,
         access_policy.Rule("POST", WRITE_PATH, access_policy.STUDIO_WRITE),

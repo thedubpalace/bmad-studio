@@ -7,9 +7,19 @@ from pydantic import BaseModel, Field
 
 from bmad_studio.api import auth
 from bmad_studio.api.envelope import error_response, ok
+from bmad_studio.api.schemas import ERRORS, SessionEnvelope
 from bmad_studio.core.credentials import CredentialsUnavailable
 
 router = APIRouter()
+
+
+def _session_data(request: Request, session: auth.Session) -> dict[str, object]:
+    state = request.app.state
+    return {
+        "authenticated": True, "username": session.username,
+        "role": auth.role_for(session.username, state.settings, state.credentials),
+        "csrf": session.csrf, "review_url": state.settings.review_url,
+    }
 
 
 class LoginBody(BaseModel):
@@ -23,7 +33,7 @@ def _audit_login(request: Request, username: str, result: str, ip: str, status: 
     })
 
 
-@router.post("/api/login")
+@router.post("/api/login", response_model=SessionEnvelope, responses=ERRORS)
 def login(body: LoginBody, request: Request) -> JSONResponse:
     state = request.app.state
     ip = auth.client_ip(request)
@@ -55,8 +65,7 @@ def login(body: LoginBody, request: Request) -> JSONResponse:
         return error_response(503, "audit_unavailable", "ระบบบันทึกไม่ได้ ไม่มีการเปลี่ยนแปลง")
     state.rate_limiter.succeeded(ip, username)
     cookie, session = auth.create_session(state.settings, creds)
-    role = auth.role_for(session.username, state.settings, state.credentials)
-    response = ok({"authenticated": True, "username": session.username, "role": role, "csrf": session.csrf})
+    response = ok(_session_data(request, session))
     auth.set_session_cookie(response, state.settings, cookie)
     return response
 
@@ -68,16 +77,15 @@ def _safe_audit(request: Request, username: str, result: str, ip: str, status: i
         pass  # การปฏิเสธไม่ต้องรอ audit; ไม่มีอะไรถูกเปลี่ยน
 
 
-@router.get("/api/session")
+@router.get("/api/session", response_model=SessionEnvelope)
 def session(request: Request) -> JSONResponse:
     current = auth.read_session(request)
     if current is None:
         return ok({"authenticated": False})
-    role = auth.role_for(current.username, request.app.state.settings, request.app.state.credentials)
-    return ok({"authenticated": True, "username": current.username, "role": role, "csrf": current.csrf})
+    return ok(_session_data(request, current))
 
 
-@router.post("/api/logout")
+@router.post("/api/logout", response_model=SessionEnvelope, responses=ERRORS)
 def logout(request: Request) -> JSONResponse:
     response = ok({"authenticated": False})
     auth.clear_session_cookie(response, request.app.state.settings)

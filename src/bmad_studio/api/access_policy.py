@@ -33,10 +33,16 @@ class Rule:
     method: str
     template: str
     permission: str
+    exclude_prefixes: tuple[str, ...] = ()
     regex: re.Pattern = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "regex", compile_path(self.template)[0])
+
+    def matches(self, path: str) -> bool:
+        if any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in self.exclude_prefixes):
+            return False
+        return bool(self.regex.match(path))
 
     @property
     def mutation(self) -> bool:
@@ -55,6 +61,8 @@ RULES: list[Rule] = [
     # health probe ของ monitor.ps1 — ตอบ {"ok": true} เท่านั้น
     *_rules(PUBLIC, "GET", "/health"),
     *_rules(SESSION_SELF, "POST", "/api/logout"),
+    # SPA deep link (/p/..., /agents/...) ได้ shell เดียวกัน — ไม่รวม /api/* (ซึ่งต้องมี rule ของตัวเอง)
+    Rule("GET", "/{path:path}", PUBLIC, exclude_prefixes=("/api/",)),
 ]
 
 
@@ -62,7 +70,7 @@ def match(method: str, path: str) -> Rule | None:
     """rule ของ request นี้ หรือ ``None`` (deny). HEAD ตอบแบบ GET."""
     lookup = "GET" if method == "HEAD" else method
     for rule in RULES:
-        if rule.method == lookup and rule.regex.match(path):
+        if rule.method == lookup and rule.matches(path):
             return rule
     return None
 
