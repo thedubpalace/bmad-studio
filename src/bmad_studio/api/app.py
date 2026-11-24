@@ -14,6 +14,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from bmad_studio.api.audit import AuditLog
+from bmad_studio.api.auth import LoginRateLimiter
+from bmad_studio.api.envelope import error_response
+from bmad_studio.api.routes import session as session_routes
+from bmad_studio.core.credentials import CredentialStore
 from bmad_studio.core.errors import StartupError, StudioError
 from bmad_studio.core.settings import DEFAULT_HOST, Settings, check_host, check_startup, get_settings
 
@@ -23,14 +28,6 @@ _HTTP_CODES = {
     404: ("not_found", "ไม่พบสิ่งที่ร้องขอ"),
     405: ("method_not_allowed", "ไม่รองรับ method นี้"),
 }
-
-
-def error_response(status: int, code: str, message_th: str, details: object | None = None,
-                   headers: dict[str, str] | None = None) -> JSONResponse:
-    body: dict[str, object] = {"ok": False, "code": code, "error": message_th}
-    if details is not None:
-        body["details"] = details
-    return JSONResponse(body, status_code=status, headers={"Cache-Control": "no-store", **(headers or {})})
 
 
 def _install_error_handlers(app: FastAPI) -> None:
@@ -58,7 +55,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     check_startup(settings)
     app = FastAPI(title="bmad-studio", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
+    app.state.credentials = CredentialStore(settings.credentials_env_file)
+    app.state.rate_limiter = LoginRateLimiter(settings.login_rate_attempts, settings.login_rate_window_seconds)
+    app.state.audit = AuditLog(settings.runtime_dir)
     _install_error_handlers(app)
+    app.include_router(session_routes.router)
 
     @app.get("/health", include_in_schema=False)
     async def health() -> dict[str, bool]:

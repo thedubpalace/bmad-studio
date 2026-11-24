@@ -62,3 +62,33 @@ def read_credentials(path: Path | None) -> Credentials:
         raise CredentialsUnavailable(f"{PASSWORD_KEY} ว่างหรือไม่มีในไฟล์ credential")
     username = values.get(USERNAME_KEY, "").strip() or DEFAULT_USERNAME
     return Credentials(username=username, password=password)
+
+
+class CredentialStore:
+    """อ่านไฟล์ credential ใหม่เมื่อไฟล์เปลี่ยน (cache ตาม mtime+size) — ไม่ต้อง restart.
+
+    ไฟล์หาย/อ่านไม่ได้ระหว่างรัน = :class:`CredentialsUnavailable` (fail closed, ไม่ใช้ค่าเก่า).
+    """
+
+    def __init__(self, path: Path | None) -> None:
+        self._path = Path(path) if path is not None else None
+        self._stamp: tuple[int, int] | None = None
+        self._cached: Credentials | None = None
+
+    def __repr__(self) -> str:
+        return "CredentialStore(<redacted>)"
+
+    def current(self) -> Credentials:
+        if self._path is None:
+            raise CredentialsUnavailable("ไม่ได้ตั้ง BMAD_STUDIO_CREDENTIALS_ENV_FILE")
+        try:
+            stat = self._path.stat()
+        except OSError:
+            self._stamp, self._cached = None, None
+            raise CredentialsUnavailable("ไม่พบไฟล์ที่ BMAD_STUDIO_CREDENTIALS_ENV_FILE ชี้ไว้") from None
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        if self._cached is None or stamp != self._stamp:
+            self._stamp, self._cached = None, None
+            self._cached = read_credentials(self._path)
+            self._stamp = stamp
+        return self._cached
