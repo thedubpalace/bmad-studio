@@ -73,8 +73,8 @@ def test_wrong_password_is_401_with_thai_message(settings: Settings) -> None:
 
 def test_logout_clears_cookie(settings: Settings) -> None:
     client = _client(settings)
-    _login(client)
-    response = client.post("/api/logout")
+    csrf = _login(client).json()["data"]["csrf"]
+    response = client.post("/api/logout", headers={"X-CSRF-Token": csrf})
     assert response.status_code == 200
     assert 'bmad_studio_session=""' in response.headers["set-cookie"] or "Max-Age=0" in response.headers["set-cookie"]
     assert client.get("/api/session").json()["data"] == {"authenticated": False}

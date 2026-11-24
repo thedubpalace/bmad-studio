@@ -14,6 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from bmad_studio.api import access_guard
 from bmad_studio.api.audit import AuditLog
 from bmad_studio.api.auth import LoginRateLimiter
 from bmad_studio.api.envelope import error_response
@@ -59,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.rate_limiter = LoginRateLimiter(settings.login_rate_attempts, settings.login_rate_window_seconds)
     app.state.audit = AuditLog(settings.runtime_dir)
     _install_error_handlers(app)
+    access_guard.install(app)
     app.include_router(session_routes.router)
 
     @app.get("/health", include_in_schema=False)
