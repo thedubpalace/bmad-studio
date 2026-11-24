@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     review_url: str = "https://bridgenbrain.duckdns.org/review"
     runtime_dir: Path = REPO_ROOT / ".runtime"
     web_dist: Path = REPO_ROOT / "web" / "dist"
+    bmad_script_timeout_seconds: float = 20.0
 
     def session_secret_value(self) -> str:
         value = self.session_secret

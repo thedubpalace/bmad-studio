@@ -61,6 +61,8 @@ RULES: list[Rule] = [
     # health probe ของ monitor.ps1 — ตอบ {"ok": true} เท่านั้น
     *_rules(PUBLIC, "GET", "/health"),
     *_rules(SESSION_SELF, "POST", "/api/logout"),
+    # BMAD inventory (REQ-039)
+    *_rules(STUDIO_READ, "GET", "/api/bmad/inventory"),
     # SPA deep link (/p/..., /agents/...) ได้ shell เดียวกัน — ไม่รวม /api/* (ซึ่งต้องมี rule ของตัวเอง)
     Rule("GET", "/{path:path}", PUBLIC, exclude_prefixes=("/api/",)),
 ]

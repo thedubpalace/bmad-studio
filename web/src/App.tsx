@@ -5,6 +5,7 @@ import { AppShell } from "./components/AppShell";
 import { EmptyState } from "./components/EmptyState";
 import { SessionExpiredModal } from "./components/SessionDialogs";
 import { th } from "./i18n/th";
+import { BmadOverview } from "./pages/BmadOverview";
 import { LoginPage } from "./pages/LoginPage";
 
 function Section({ title, empty }: { title: string; empty: { title: string; body: string } }) {
@@ -57,6 +58,14 @@ export function App() {
         <Route path="/p/*" element={<Section title={th.nav.projects} empty={th.empty.projects} />} />
         <Route path="/flow/default" element={<Section title={th.nav.defaultFlow} empty={th.empty.defaultFlow} />} />
         <Route path="/agents/*" element={<Section title={th.nav.agents} empty={th.empty.agents} />} />
+        <Route
+          path="/bmad"
+          element={
+            <AppShell title={th.nav.bmad}>
+              <BmadOverview />
+            </AppShell>
+          }
+        />
         <Route path="/bmad/*" element={<Section title={th.nav.bmad} empty={th.empty.bmad} />} />
         <Route path="/changes" element={<Section title={th.nav.changes} empty={th.empty.changes} />} />
         <Route path="*" element={<Section title={th.empty.notFound.title} empty={th.empty.notFound} />} />

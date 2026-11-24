@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -19,10 +20,13 @@ from bmad_studio.api.audit import AuditLog
 from bmad_studio.api.auth import LoginRateLimiter
 from bmad_studio.api.envelope import error_response
 from bmad_studio import __version__
+from bmad_studio.adapters.bmad import BmadScripts
+from bmad_studio.api.routes import bmad as bmad_routes
 from bmad_studio.api.routes import session as session_routes
 from bmad_studio.api.routes import web as web_routes
 from bmad_studio.core.credentials import CredentialStore
 from bmad_studio.core.errors import StartupError, StudioError
+from bmad_studio.core.paths import VedaPaths
 from bmad_studio.core.settings import DEFAULT_HOST, Settings, check_host, check_startup, get_settings
 
 EXIT_STARTUP = 2
@@ -63,6 +67,7 @@ def create_app(settings: Settings | None = None, *, check: bool = True) -> FastA
     app.state.credentials = CredentialStore(settings.credentials_env_file)
     app.state.rate_limiter = LoginRateLimiter(settings.login_rate_attempts, settings.login_rate_window_seconds)
     app.state.audit = AuditLog(settings.runtime_dir)
+    app.state.bmad = BmadScripts(VedaPaths(Path(settings.veda_root or ".")), settings.bmad_script_timeout_seconds)
     _install_error_handlers(app)
     access_guard.install(app)
 
@@ -71,6 +76,7 @@ def create_app(settings: Settings | None = None, *, check: bool = True) -> FastA
         return {"ok": True}
 
     app.include_router(session_routes.router)
+    app.include_router(bmad_routes.router)
     web_routes.mount_assets(app, settings.web_dist)
     web_routes.install_shell(app)  # ต้องอยู่ท้ายสุด: catch-all ของ SPA shell
     return app

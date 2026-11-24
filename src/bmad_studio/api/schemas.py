@@ -26,6 +26,52 @@ class SessionEnvelope(BaseModel):
     data: SessionData
 
 
+class SectionError(BaseModel):
+    code: str
+    error: str
+    reason: str | None = None
+
+
+class SkillItem(BaseModel):
+    id: str
+    description: str
+    override_team: bool
+    override_user: bool
+
+
+class AgentItem(BaseModel):
+    id: str
+    name: str | None = None
+    title: str | None = None
+    module: str | None = None
+    description: str | None = None
+
+
+class ResolvedConfig(BaseModel):
+    """ส่วนที่มาจาก resolve_config.py — ``error`` ไม่ว่างเมื่อสคริปต์ใช้ไม่ได้ (ส่วนอื่นยังแสดงได้)."""
+    ok: bool
+    agents: list[AgentItem] = []
+    core: dict[str, Any] = {}
+    error: SectionError | None = None
+
+
+class ToolStatus(BaseModel):
+    uv: bool
+    resolve_script: bool
+
+
+class Inventory(BaseModel):
+    version: str | None
+    skills: list[SkillItem]
+    config: ResolvedConfig
+    tools: ToolStatus
+
+
+class InventoryEnvelope(BaseModel):
+    ok: Literal[True]
+    data: Inventory
+
+
 ERRORS: dict[int | str, dict[str, Any]] = {
     status: {"model": ErrorEnvelope} for status in (401, 403, 422, 429, 503)
 }
