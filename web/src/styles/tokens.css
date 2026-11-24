@@ -18,6 +18,8 @@
   --on-fill: #060c13;
   --diff-add-bg: #133c1f8c;
   --diff-del-bg: #551f1d8c;
+  --diff-add-word: #1f6a35bf;
+  --diff-del-word: #8a2f2bbf;
 
   --font-ui: -apple-system, "SF Pro Text", Inter, system-ui, "Segoe UI", "Noto Sans Thai Looped", "Noto Sans Thai", sans-serif;
   --font-mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", monospace;
@@ -67,5 +69,7 @@
     --on-fill: oklch(0.15 0.02 255);
     --diff-add-bg: oklch(0.32 0.07 150 / 0.55);
     --diff-del-bg: oklch(0.32 0.08 25 / 0.55);
+    --diff-add-word: oklch(0.45 0.12 150 / 0.75);
+    --diff-del-word: oklch(0.45 0.14 25 / 0.75);
   }
 }
