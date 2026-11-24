@@ -61,6 +61,9 @@ def read_credentials(path: Path | None) -> Credentials:
     if not password:
         raise CredentialsUnavailable(f"{PASSWORD_KEY} ว่างหรือไม่มีในไฟล์ credential")
     username = values.get(USERNAME_KEY, "").strip() or DEFAULT_USERNAME
+    if "|" in username:
+        # "|" คั่น field ใน cookie ของ session — username แบบนี้ login ได้แต่ session จะใช้ไม่ได้เลย
+        raise CredentialsUnavailable(f"{USERNAME_KEY} มีอักขระ | ซึ่งใช้เป็นชื่อผู้ใช้ของ bmad-studio ไม่ได้")
     return Credentials(username=username, password=password)
 
 

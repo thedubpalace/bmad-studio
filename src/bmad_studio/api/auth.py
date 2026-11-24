@@ -58,13 +58,26 @@ def create_session(settings: Settings, creds: Credentials, now: float | None = N
     return f"{value}|{_sign(secret, value)}", Session(creds.username, expiry, csrf)
 
 
+def _same(a: str, b: str) -> bool:
+    """compare_digest แบบ bytes — str ที่มีอักขระ non-ASCII ทำให้ compare_digest raise TypeError."""
+    return hmac.compare_digest(a.encode("utf-8", "surrogateescape"), b.encode("utf-8", "surrogateescape"))
+
+
 def parse_session(raw: str, settings: Settings, store: CredentialStore, now: float | None = None) -> Session | None:
+    """cookie ที่ถูกต้อง → :class:`Session`; ทุกกรณีที่ parse/ตรวจไม่ผ่าน (รวม input แปลก ๆ) → ``None``."""
+    try:
+        return _parse_session(raw, settings, store, now)
+    except (TypeError, ValueError, UnicodeError):
+        return None
+
+
+def _parse_session(raw: str, settings: Settings, store: CredentialStore, now: float | None) -> Session | None:
     parts = raw.split("|")
     if len(parts) != 5:
         return None
     username, expiry_raw, csrf, fingerprint, supplied = parts
     secret = settings.session_secret_value()
-    if not hmac.compare_digest(supplied, _sign(secret, "|".join(parts[:4]))):
+    if not _same(supplied, _sign(secret, "|".join(parts[:4]))):
         return None
     try:
         expiry = int(expiry_raw)
@@ -76,7 +89,7 @@ def parse_session(raw: str, settings: Settings, store: CredentialStore, now: flo
         creds = store.current()
     except CredentialsUnavailable:
         return None  # fail closed
-    if username != creds.username or not hmac.compare_digest(fingerprint, credential_fingerprint(secret, creds)):
+    if not _same(username, creds.username) or not _same(fingerprint, credential_fingerprint(secret, creds)):
         return None
     return Session(username, expiry, csrf)
 
@@ -133,35 +146,72 @@ def client_ip(request: Request) -> str:
     return peer
 
 
-class LoginRateLimiter:
-    """นับ login ที่ล้มเหลวต่อ (IP, username) ใน memory; เกินกำหนด = 429 + Retry-After."""
+DEFAULT_MAX_KEYS = 10_000
 
-    def __init__(self, attempts: int, window_seconds: int) -> None:
+
+class LoginRateLimiter:
+    """นับ login ที่ล้มเหลวต่อ (IP, username) ใน memory; เกินกำหนด = 429 + Retry-After.
+
+    หน่วยความจำมีขอบเขต (CWE-770): key ที่ bucket ว่างหลังตัดของหมดอายุถูกลบทันที,
+    กวาด key หมดอายุทั้งหมดเป็นระยะ และจำนวน key ไม่เกิน ``max_keys`` — เมื่อเต็ม
+    กวาดของหมดอายุก่อน แล้วไล่ key ที่ล้มเหลวล่าสุดนานที่สุดออก (dict เรียงตามการล้มเหลวล่าสุด).
+    """
+
+    def __init__(self, attempts: int, window_seconds: int, max_keys: int = DEFAULT_MAX_KEYS) -> None:
         self.attempts = max(1, attempts)
         self.window = max(1, window_seconds)
+        self.max_keys = max(1, max_keys)
         self._failures: dict[tuple[str, str], deque[float]] = {}
         self._lock = threading.Lock()
+        self._last_sweep = 0.0
 
-    def _recent(self, key: tuple[str, str], now: float) -> deque[float]:
-        bucket = self._failures.get(key, deque())
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._failures)
+
+    def _prune(self, key: tuple[str, str], now: float) -> deque[float] | None:
+        """ตัด timestamp หมดอายุของ key; bucket ว่าง = ลบ key แล้วคืน ``None``."""
+        bucket = self._failures.get(key)
+        if bucket is None:
+            return None
         while bucket and bucket[0] <= now - self.window:
             bucket.popleft()
+        if not bucket:
+            del self._failures[key]
+            return None
         return bucket
+
+    def _sweep(self, now: float, force: bool = False) -> None:
+        if not force and now - self._last_sweep < min(60, self.window):
+            return
+        self._last_sweep = now
+        for key in list(self._failures):
+            self._prune(key, now)
 
     def retry_after(self, ip: str, username: str, now: float | None = None) -> int | None:
         """วินาทีที่ต้องรอ ถ้าถูกบล็อกอยู่; ``None`` ถ้าลองได้."""
         now = time.time() if now is None else now
         with self._lock:
-            bucket = self._recent((ip, username), now)
-            if len(bucket) < self.attempts:
+            self._sweep(now)
+            bucket = self._prune((ip, username), now)
+            if bucket is None or len(bucket) < self.attempts:
                 return None
             return max(1, math.ceil(bucket[0] + self.window - now))
 
     def failed(self, ip: str, username: str, now: float | None = None) -> None:
         now = time.time() if now is None else now
         with self._lock:
+            self._sweep(now)
             key = (ip, username)
-            bucket = self._recent(key, now)
+            bucket = self._prune(key, now)
+            if bucket is None:
+                if len(self._failures) >= self.max_keys:
+                    self._sweep(now, force=True)
+                while len(self._failures) >= self.max_keys:
+                    del self._failures[next(iter(self._failures))]  # ล้มเหลวล่าสุดนานที่สุด
+                bucket = deque()
+            else:
+                del self._failures[key]  # ย้ายไปท้าย = ล้มเหลวล่าสุด
             bucket.append(now)
             self._failures[key] = bucket
 
