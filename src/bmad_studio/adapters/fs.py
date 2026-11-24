@@ -12,13 +12,13 @@ BOM เดิมคงไว้. ไม่แก้อะไรเลย = bytes
 from __future__ import annotations
 
 import codecs
-import difflib
 import hashlib
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from bmad_studio.core.diff import line_opcodes  # งานมีขอบเขต: input มาจากผู้ใช้ภายนอก
 from bmad_studio.core.errors import StudioError
 
 MAX_BYTES = 2 * 1024 * 1024  # ไฟล์ config/agent/flow จริงเล็กกว่านี้มาก
@@ -82,11 +82,9 @@ class TextDoc:
             return self.raw if self.exists else self.bom + self.text.encode(self.encoding)
         new_lines = _split(to_lf(new_text))
         old_lines = _split(self.raw[len(self.bom):].decode(self.encoding)) if self.exists else []
-        matcher = difflib.SequenceMatcher(
-            a=[content for content, _ in old_lines], b=[content for content, _ in new_lines], autojunk=False
-        )
+        opcodes = line_opcodes([content for content, _ in old_lines], [content for content, _ in new_lines])
         out: list[str] = []
-        for tag, a0, _a1, b0, b1 in matcher.get_opcodes():
+        for tag, a0, _a1, b0, b1 in opcodes:
             for offset, index in enumerate(range(b0, b1)):
                 content, new_eol = new_lines[index]
                 eol = ""
@@ -163,3 +161,28 @@ def _not_a_file() -> StudioError:
 
 def _unsupported() -> StudioError:
     return StudioError("unsupported_encoding", "ไฟล์นี้ไม่ได้เข้ารหัสแบบ UTF-8 แก้ผ่านสตูดิโอไม่ได้", 422)
+
+
+def write_bytes_atomic(path: Path | str, data: bytes) -> None:
+    """เขียน ``data`` แทนไฟล์ ``path`` แบบ atomic: temp ในโฟลเดอร์เดียวกัน → fsync → ``os.replace``.
+
+    ``os.replace`` แทนที่ entry ของ directory (ไม่ตาม link ที่ปลายทาง). เรียกได้จาก
+    :mod:`bmad_studio.core.writes` เท่านั้น (test ``test_write_path_scan``) — ผู้เรียกต้องผ่าน
+    path guard และถือ lock ของ path แล้ว. ล้มเหลว = ``OSError`` และไฟล์เดิมไม่เปลี่ยน.
+    """
+    target = os.fspath(path)
+    directory, name = os.path.split(target)
+    tmp = os.path.join(directory, f".{name}.{os.urandom(8).hex()}.bmad-studio.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise

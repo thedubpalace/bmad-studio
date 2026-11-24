@@ -149,3 +149,15 @@ def test_parent_is_a_file(tmp_path: Path) -> None:
         assert exc.code == "not_a_file"
     else:  # Windows รายงาน FileNotFoundError — guard ปฏิเสธ path แบบนี้อยู่แล้ว (ไม่อยู่ใน allowlist)
         assert doc.exists is False
+
+
+def test_encode_adversarial_repetitive_lines_is_fast() -> None:
+    import time
+
+    raw = "".join(f"{i % 2}\r\n" for i in range(5000)).encode()
+    doc = fs.decode(raw)
+    new_text = "".join(f"{(i + (i % 7 == 0)) % 2}\n" for i in range(5000))
+    start = time.perf_counter()
+    out = doc.encode(new_text)
+    assert time.perf_counter() - start < 3.0
+    assert fs.decode(out).text == new_text and out.count(b"\r\n") == 5000

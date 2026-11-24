@@ -8,6 +8,79 @@ export interface AgentItem {
   description?: string | null;
 }
 
+export interface ChangeCommit {
+  change_id: string;
+  path: string;
+  op: "create" | "modify";
+  sha256: string;
+  backup: string;
+  at: string;
+  replayed: boolean;
+}
+
+export interface ChangeCommitEnvelope {
+  ok: true;
+  data: ChangeCommit;
+}
+
+export interface ChangePreview {
+  preview_id: string;
+  path: string;
+  kind: string;
+  op: "create" | "modify";
+  impact: "normal" | "high";
+  confirm_phrase?: string | null;
+  base_sha256?: string | null;
+  proposed_sha256: string;
+  diff: Diff;
+  warnings?: Array<Issue>;
+  errors?: Array<Issue>;
+  confirm_token: string;
+  expires_at: string;
+}
+
+export interface ChangePreviewEnvelope {
+  ok: true;
+  data: ChangePreview;
+}
+
+export interface ChangeRequestBody {
+  kind: string;
+  target: string;
+  payload?: Record<string, unknown>;
+  base_sha256?: string | null;
+}
+
+export interface CommitBody {
+  preview_id: string;
+  confirm_token: string;
+  typed_confirmation?: string | null;
+}
+
+export interface Diff {
+  hunks: Array<DiffHunk>;
+  added: number;
+  removed: number;
+  old_eof_newline?: boolean;
+  new_eof_newline?: boolean;
+}
+
+export interface DiffHunk {
+  old_start: number;
+  old_lines: number;
+  new_start: number;
+  new_lines: number;
+  lines: Array<DiffLine>;
+}
+
+export interface DiffLine {
+  type: "context" | "add" | "del";
+  old?: number | null;
+  new?: number | null;
+  text: string;
+  spans?: Array<Array<number>>;
+}
+
 export interface ErrorEnvelope {
   ok: false;
   code: string;
@@ -25,6 +98,11 @@ export interface Inventory {
 export interface InventoryEnvelope {
   ok: true;
   data: Inventory;
+}
+
+export interface Issue {
+  code: string;
+  error: string;
 }
 
 export interface LoginBody {

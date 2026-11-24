@@ -21,12 +21,16 @@ from bmad_studio.api.auth import LoginRateLimiter
 from bmad_studio.api.envelope import error_response
 from bmad_studio import __version__
 from bmad_studio.adapters.bmad import BmadScripts
+from bmad_studio.adapters.state import RuntimeState
 from bmad_studio.api.routes import bmad as bmad_routes
+from bmad_studio.api.routes import changes as changes_routes
 from bmad_studio.api.routes import session as session_routes
 from bmad_studio.api.routes import web as web_routes
 from bmad_studio.core.credentials import CredentialStore
 from bmad_studio.core.errors import StartupError, StudioError
+from bmad_studio.core.path_guard import PathGuard
 from bmad_studio.core.paths import VedaPaths
+from bmad_studio.core.writes import TextKind, WritePipeline
 from bmad_studio.core.settings import DEFAULT_HOST, Settings, check_host, check_startup, get_settings
 
 EXIT_STARTUP = 2
@@ -57,6 +61,38 @@ def _install_error_handlers(app: FastAPI) -> None:
         return error_response(500, "internal_error", "เกิดข้อผิดพลาดภายในระบบ")
 
 
+# body ของ /api ใหญ่สุด: ข้อความ 2 MiB เป็น JSON (escape ได้ ~6 เท่ากรณีแย่) + ส่วนอื่น
+MAX_API_BODY = 13 * 1024 * 1024
+
+
+def _install_body_limit(app: FastAPI) -> None:
+    """ปฏิเสธ body ใหญ่เกินก่อน parse JSON (กัน memory หมดจาก request เดียว)."""
+
+    @app.middleware("http")
+    async def body_limit(request: Request, call_next):
+        if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+            length = request.headers.get("content-length")
+            if length is None:
+                if request.headers.get("transfer-encoding"):
+                    return error_response(411, "length_required", "ต้องระบุขนาดของคำขอ")
+            else:
+                try:
+                    size = int(length)
+                except ValueError:
+                    return error_response(400, "invalid_request", "ข้อมูลที่ส่งมาไม่ถูกต้อง")
+                if size < 0 or size > MAX_API_BODY:
+                    return error_response(413, "request_too_large", "คำขอใหญ่เกินไป")
+        return await call_next(request)
+
+
+def _build_pipeline(settings: Settings) -> WritePipeline:
+    kinds = {}
+    if settings.enable_text_kind:
+        kinds["text"] = TextKind()
+    return WritePipeline(PathGuard(Path(settings.veda_root or ".")), RuntimeState(settings.runtime_dir),
+                         settings.session_secret_value(), kinds)
+
+
 def create_app(settings: Settings | None = None, *, check: bool = True) -> FastAPI:
     """สร้าง app; ``check=False`` ใช้เฉพาะการ export OpenAPI (ไม่รับ request จริง)."""
     settings = settings or get_settings()
@@ -68,8 +104,10 @@ def create_app(settings: Settings | None = None, *, check: bool = True) -> FastA
     app.state.rate_limiter = LoginRateLimiter(settings.login_rate_attempts, settings.login_rate_window_seconds)
     app.state.audit = AuditLog(settings.runtime_dir)
     app.state.bmad = BmadScripts(VedaPaths(Path(settings.veda_root or ".")), settings.bmad_script_timeout_seconds)
+    app.state.writes = _build_pipeline(settings) if check else None
     _install_error_handlers(app)
     access_guard.install(app)
+    _install_body_limit(app)  # เพิ่มทีหลัง = ทำงานก่อน access guard
 
     @app.get("/health", include_in_schema=False)
     async def health() -> dict[str, bool]:
@@ -77,6 +115,7 @@ def create_app(settings: Settings | None = None, *, check: bool = True) -> FastA
 
     app.include_router(session_routes.router)
     app.include_router(bmad_routes.router)
+    app.include_router(changes_routes.router)
     web_routes.mount_assets(app, settings.web_dist)
     web_routes.install_shell(app)  # ต้องอยู่ท้ายสุด: catch-all ของ SPA shell
     return app

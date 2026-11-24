@@ -72,6 +72,75 @@ class InventoryEnvelope(BaseModel):
     data: Inventory
 
 
+class DiffLine(BaseModel):
+    type: Literal["context", "add", "del"]
+    old: int | None = None
+    new: int | None = None
+    text: str
+    spans: list[list[int]] = []
+
+
+class DiffHunk(BaseModel):
+    old_start: int
+    old_lines: int
+    new_start: int
+    new_lines: int
+    lines: list[DiffLine]
+
+
+class Diff(BaseModel):
+    hunks: list[DiffHunk]
+    added: int
+    removed: int
+    old_eof_newline: bool = True  # false = ไม่มี newline ท้ายไฟล์ (UI แสดงป้าย)
+    new_eof_newline: bool = True
+
+
+class Issue(BaseModel):
+    code: str
+    error: str
+
+
+class ChangePreview(BaseModel):
+    preview_id: str
+    path: str
+    kind: str
+    op: Literal["create", "modify"]
+    impact: Literal["normal", "high"]
+    confirm_phrase: str | None = None
+    base_sha256: str | None = None
+    proposed_sha256: str
+    diff: Diff
+    warnings: list[Issue] = []
+    errors: list[Issue] = []
+    confirm_token: str
+    expires_at: str
+
+
+class ChangePreviewEnvelope(BaseModel):
+    ok: Literal[True]
+    data: ChangePreview
+
+
+class ChangeCommit(BaseModel):
+    change_id: str
+    path: str
+    op: Literal["create", "modify"]
+    sha256: str
+    backup: str
+    at: str
+    replayed: bool
+
+
+class ChangeCommitEnvelope(BaseModel):
+    ok: Literal[True]
+    data: ChangeCommit
+
+
 ERRORS: dict[int | str, dict[str, Any]] = {
     status: {"model": ErrorEnvelope} for status in (401, 403, 422, 429, 503)
+}
+
+CHANGE_ERRORS: dict[int | str, dict[str, Any]] = {
+    status: {"model": ErrorEnvelope} for status in (400, 401, 403, 409, 411, 413, 422, 429, 500, 503)
 }

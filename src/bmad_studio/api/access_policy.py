@@ -63,6 +63,8 @@ RULES: list[Rule] = [
     *_rules(SESSION_SELF, "POST", "/api/logout"),
     # BMAD inventory (REQ-039)
     *_rules(STUDIO_READ, "GET", "/api/bmad/inventory"),
+    # write pipeline (REQ-043, AD-5): preview แล้ว commit ด้วย confirm token
+    *_rules(STUDIO_WRITE, "POST", "/api/changes/preview", "/api/changes/commit"),
     # SPA deep link (/p/..., /agents/...) ได้ shell เดียวกัน — ไม่รวม /api/* (ซึ่งต้องมี rule ของตัวเอง)
     Rule("GET", "/{path:path}", PUBLIC, exclude_prefixes=("/api/",)),
 ]

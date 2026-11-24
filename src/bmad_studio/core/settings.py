@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     runtime_dir: Path = REPO_ROOT / ".runtime"
     web_dist: Path = REPO_ROOT / "web" / "dist"
     bmad_script_timeout_seconds: float = 20.0
+    # kind ``text`` ของ write pipeline (เขียนทั้งไฟล์) — สำหรับ test/dev เท่านั้น (AD-5)
+    enable_text_kind: bool = False
 
     def session_secret_value(self) -> str:
         value = self.session_secret
