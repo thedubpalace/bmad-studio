@@ -61,7 +61,13 @@ def read_registry(paths: VedaPaths) -> list[dict[str, Any]]:
     projects = data.get("projects") if isinstance(data, dict) else data
     if not isinstance(projects, list):
         raise StudioError("registry_unreadable", "registry ไม่มีรายการ projects", 503)
-    return [p for p in projects if isinstance(p, dict) and valid_project_name(p.get("name"))]
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for p in projects:
+        if isinstance(p, dict) and valid_project_name(p.get("name")) and p["name"] not in seen:
+            seen.add(p["name"])  # ชื่อซ้ำ: ใช้รายการแรก (find_project ก็ใช้รายการแรก)
+            out.append(p)
+    return out
 
 
 def find_project(paths: VedaPaths, name: str) -> dict[str, Any]:

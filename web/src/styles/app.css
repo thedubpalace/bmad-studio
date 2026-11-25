@@ -1119,3 +1119,233 @@ p {
     width: 100%;
   }
 }
+
+/* ---------- Projects / flow status (REQ-050, UX-DR8) ---------- */
+.projects {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.projects__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s-3) var(--s-6);
+}
+
+.projects__search {
+  flex: 1 1 260px;
+  max-width: 420px;
+}
+
+.project-group + .project-group {
+  margin-top: var(--s-6);
+}
+
+.project-list,
+.stage-list,
+.stage-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.project-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--glass-hairline);
+}
+
+.project-row:first-child {
+  border-top: 0;
+}
+
+.project-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.project-row__name {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  font-weight: 650;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.project-row__next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1);
+  margin: 0;
+  line-break: strict;
+}
+
+/* ชิปต่อขั้น: เลื่อนแนวนอนในแถวบนจอแคบ (scroll-snap) — ไม่ล้นหน้า */
+.stage-chips {
+  display: flex;
+  gap: var(--s-1);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  padding-bottom: 2px;
+}
+
+.stage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  padding: 2px var(--s-2);
+  border-radius: 999px;
+  border: 1px solid var(--glass-hairline);
+  font-size: var(--fs-14);
+  color: var(--text-2);
+}
+
+.stage-chip--done .icon,
+.stage-status--done .icon {
+  color: var(--ok);
+}
+
+.stage-chip--active .icon,
+.stage-status--active .icon {
+  color: var(--accent);
+}
+
+.stage-chip--active {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.stage-chip--skipped,
+.stage-row--skipped .stage-row__id,
+.stage-row--skipped .stage-row__agent,
+.stage-status--skipped {
+  color: var(--skip);
+}
+
+.stage-chip--skipped .stage-chip__id {
+  text-decoration: underline dotted;
+}
+
+.flow-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-4);
+}
+
+.flow-head__back {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  color: var(--accent);
+}
+
+.flow-head__name {
+  margin: 0;
+  font-size: var(--fs-20);
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.flow-status__source {
+  margin: 0 0 var(--s-3);
+  overflow-wrap: anywhere;
+}
+
+.callout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-solid);
+  border: 1px solid var(--glass-hairline);
+  font-size: var(--fs-16);
+  line-break: strict;
+}
+
+.flow-status .banner {
+  margin: 0 0 var(--s-3);
+}
+
+.stage-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--glass-hairline);
+}
+
+.stage-row:first-child {
+  border-top: 0;
+}
+
+.stage-row--locked {
+  background: color-mix(in oklch, var(--lock) 8%, transparent);
+  padding-inline: var(--s-2);
+  border-radius: var(--radius-sm);
+}
+
+.stage-row__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.stage-row__id {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.stage-row__agent {
+  color: var(--text-2);
+}
+
+.stage-row__reason {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-14);
+  max-width: 68ch;
+  line-break: strict;
+}
+
+.stage-row__lock-reason {
+  display: block;
+  color: var(--lock);
+}
+
+.flow-status__lock .icon {
+  color: var(--lock);
+}
+
+.stage-row__review {
+  align-self: flex-start;
+}
+
+.stage-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 6.5em;
+}
+
+.tag--lock {
+  color: var(--lock);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

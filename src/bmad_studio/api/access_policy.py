@@ -66,6 +66,8 @@ RULES: list[Rule] = [
     # write pipeline (REQ-043, AD-5): preview แล้ว commit ด้วย confirm token
     *_rules(STUDIO_WRITE, "POST", "/api/changes/preview", "/api/changes/commit"),
     *_rules(STUDIO_READ, "GET", "/api/changes", "/api/changes/{change_id}"),
+    # สถานะ flow ต่อโปรเจกต์ (REQ-050) — อ่านอย่างเดียว
+    *_rules(STUDIO_READ, "GET", "/api/projects", "/api/projects/{name}/flow-status"),
     # SPA deep link (/p/..., /agents/...) ได้ shell เดียวกัน — ไม่รวม /api/* (ซึ่งต้องมี rule ของตัวเอง)
     Rule("GET", "/{path:path}", PUBLIC, exclude_prefixes=("/api/",)),
 ]

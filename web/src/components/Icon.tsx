@@ -14,6 +14,11 @@ const PATHS = {
   cross: "M6 6l12 12M18 6 6 18",
   inbox: "M4 13h4l2 3h4l2-3h4M4 13l2.5-7h11L20 13v6H4v-6Z",
   lock: "M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z",
+  pending: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z",
+  active: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-13v4l3 2",
+  skip: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM8 12h8",
+  person: "M12 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-6.5 9a6.5 6.5 0 0 1 13 0",
+  search: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm9 2-4.2-4.2",
 } as const;
 
 export type IconName = keyof typeof PATHS;

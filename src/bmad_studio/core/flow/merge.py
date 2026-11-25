@@ -198,9 +198,13 @@ def overlay_path(paths: VedaPaths, project: str) -> Path:
     return paths.veda_state_dir / "projects" / project / "flow.yaml"
 
 
-def effective_for(paths: VedaPaths, project: str | None, catalog: Catalog | None) -> Effective:
-    """flow ที่ใช้จริงของโปรเจกต์ (ไม่มี overlay = default). ผิด = :class:`FlowInvalid`."""
-    default, source = load_default(paths, catalog)
+def effective_for(paths: VedaPaths, project: str | None, catalog: Catalog | None,
+                  loaded_default: tuple[Flow, str] | None = None) -> Effective:
+    """flow ที่ใช้จริงของโปรเจกต์ (ไม่มี overlay = default). ผิด = :class:`FlowInvalid`.
+
+    ``loaded_default`` = ผลของ :func:`load_default` ที่โหลดไว้แล้ว (รายการหลายโปรเจกต์ใน request เดียว).
+    """
+    default, source = loaded_default if loaded_default is not None else load_default(paths, catalog)
     if project is None:
         return Effective(default, default, source)
     rel = f".veda/projects/{project}/flow.yaml"

@@ -116,11 +116,60 @@ export interface DiffLine {
   spans?: Array<Array<number>>;
 }
 
+export interface EntryCheck {
+  ok: boolean;
+  requirementsReady: boolean;
+  status: Array<string>;
+  projectStatus?: string | null;
+  reason?: string | null;
+}
+
 export interface ErrorEnvelope {
   ok: false;
   code: string;
   error: string;
   details?: unknown | null;
+}
+
+export interface FlowIssue {
+  code: string;
+  error: string;
+  track?: string | null;
+  stage?: string | null;
+  field?: string | null;
+  reason?: string | null;
+}
+
+export interface FlowSource {
+  default: string;
+  overlay?: string | null;
+}
+
+export interface FlowStatus {
+  project: string;
+  hasSprint: boolean;
+  flow: FlowSource;
+  registry: Record<string, unknown>;
+  track: "full" | "quick";
+  next?: NextStage | null;
+  stages: Array<StageRow>;
+  locked: Array<LockedItem>;
+  entry?: EntryCheck | null;
+  complete: boolean;
+  hints?: Array<string>;
+  warnings?: Array<FlowWarning>;
+  reviewUrl?: string | null;
+}
+
+export interface FlowStatusEnvelope {
+  ok: true;
+  data: FlowStatus;
+}
+
+export interface FlowWarning {
+  code: string;
+  error: string;
+  stage?: string | null;
 }
 
 export interface Inventory {
@@ -140,9 +189,47 @@ export interface Issue {
   error: string;
 }
 
+export interface LockedItem {
+  stage?: string | null;
+  field?: string | null;
+  reason: string;
+}
+
 export interface LoginBody {
   username: string;
   password: string;
+}
+
+export interface NextStage {
+  stage: string;
+  agent: string;
+  skill?: string | null;
+  gate: "none" | "human" | "agent-confirm";
+  optional: boolean;
+  status: "done" | "active" | "pending" | "skipped";
+  note?: string | null;
+}
+
+export interface ProjectFlowError {
+  code: string;
+  source: string;
+  issues: Array<FlowIssue>;
+}
+
+export interface ProjectListEnvelope {
+  ok: true;
+  data: Array<ProjectSummary>;
+}
+
+export interface ProjectSummary {
+  project: string;
+  description?: string | null;
+  status?: string | null;
+  error?: ProjectFlowError | null;
+  next?: NextStage | null;
+  complete: boolean;
+  overridden: boolean;
+  stages: Array<StageChip>;
 }
 
 export interface ResolvedConfig {
@@ -176,6 +263,43 @@ export interface SkillItem {
   description: string;
   override_team: boolean;
   override_user: boolean;
+}
+
+export interface StageChip {
+  id: string;
+  agent: string;
+  status: "done" | "active" | "pending" | "skipped";
+  skipReason?: string | null;
+  gate: "none" | "human" | "agent-confirm";
+}
+
+export interface StageDefault {
+  agent: string;
+  skill?: string | null;
+  enabled: boolean;
+  optional: boolean;
+  after: Array<string>;
+  gate: "none" | "human" | "agent-confirm";
+  produces: Array<string>;
+  condition?: string | null;
+}
+
+export interface StageRow {
+  id: string;
+  agent: string;
+  skill?: string | null;
+  gate: "none" | "human" | "agent-confirm";
+  after: Array<string>;
+  enabled: boolean;
+  optional: boolean;
+  condition?: string | null;
+  status: "done" | "active" | "pending" | "skipped";
+  skipReason?: string | null;
+  note?: string | null;
+  locked: boolean;
+  lockReason?: string | null;
+  overridden: boolean;
+  default?: StageDefault | null;
 }
 
 export interface ToolStatus {

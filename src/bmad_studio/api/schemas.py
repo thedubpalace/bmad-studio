@@ -180,3 +180,133 @@ class ChangeDiffEnvelope(BaseModel):
 CHANGE_ERRORS: dict[int | str, dict[str, Any]] = {
     status: {"model": ErrorEnvelope} for status in (400, 401, 403, 409, 411, 413, 422, 429, 500, 503)
 }
+
+
+# -- flow status (REQ-050, AD-1/AD-12) — ค่าทั้งหมดคำนวณใน core.flow.resolve ---------------------
+
+StageStatus = Literal["done", "active", "pending", "skipped"]
+GateKind = Literal["none", "human", "agent-confirm"]
+
+
+class FlowIssue(BaseModel):
+    code: str
+    error: str
+    track: str | None = None
+    stage: str | None = None
+    field: str | None = None
+    reason: str | None = None
+
+
+class NextStage(BaseModel):
+    stage: str
+    agent: str
+    skill: str | None = None
+    gate: GateKind
+    optional: bool
+    status: StageStatus
+    note: str | None = None
+
+
+class StageDefault(BaseModel):
+    agent: str
+    skill: str | None = None
+    enabled: bool
+    optional: bool
+    after: list[str]
+    gate: GateKind
+    produces: list[str]
+    condition: str | None = None
+
+
+class StageRow(BaseModel):
+    id: str
+    agent: str
+    skill: str | None = None
+    gate: GateKind
+    after: list[str]
+    enabled: bool
+    optional: bool
+    condition: str | None = None
+    status: StageStatus
+    skipReason: str | None = None
+    note: str | None = None
+    locked: bool
+    lockReason: str | None = None
+    overridden: bool
+    default: StageDefault | None = None
+
+
+class LockedItem(BaseModel):
+    stage: str | None = None
+    field: str | None = None
+    reason: str
+
+
+class EntryCheck(BaseModel):
+    ok: bool
+    requirementsReady: bool
+    status: list[str]
+    projectStatus: str | None = None
+    reason: str | None = None
+
+
+class FlowSource(BaseModel):
+    default: str
+    overlay: str | None = None
+
+
+class FlowWarning(BaseModel):
+    code: str
+    error: str
+    stage: str | None = None
+
+
+class FlowStatus(BaseModel):
+    project: str
+    hasSprint: bool
+    flow: FlowSource
+    registry: dict[str, Any]
+    track: Literal["full", "quick"]
+    next: NextStage | None = None
+    stages: list[StageRow]
+    locked: list[LockedItem]
+    entry: EntryCheck | None = None
+    complete: bool
+    hints: list[str] = []
+    warnings: list[FlowWarning] = []
+    reviewUrl: str | None = None
+
+
+class FlowStatusEnvelope(BaseModel):
+    ok: Literal[True]
+    data: FlowStatus
+
+
+class StageChip(BaseModel):
+    id: str
+    agent: str
+    status: StageStatus
+    skipReason: str | None = None
+    gate: GateKind
+
+
+class ProjectFlowError(BaseModel):
+    code: str
+    source: str
+    issues: list[FlowIssue]
+
+
+class ProjectSummary(BaseModel):
+    project: str
+    description: str | None = None
+    status: str | None = None
+    error: ProjectFlowError | None = None
+    next: NextStage | None = None
+    complete: bool
+    overridden: bool
+    stages: list[StageChip]
+
+
+class ProjectListEnvelope(BaseModel):
+    ok: Literal[True]
+    data: list[ProjectSummary]

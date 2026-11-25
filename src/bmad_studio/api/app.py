@@ -24,6 +24,7 @@ from bmad_studio.adapters.bmad import BmadScripts
 from bmad_studio.adapters.state import RuntimeState
 from bmad_studio.api.routes import bmad as bmad_routes
 from bmad_studio.api.routes import changes as changes_routes
+from bmad_studio.api.routes import projects as projects_routes
 from bmad_studio.api.routes import session as session_routes
 from bmad_studio.api.routes import web as web_routes
 from bmad_studio.core.credentials import CredentialStore
@@ -119,6 +120,7 @@ def create_app(settings: Settings | None = None, *, check: bool = True) -> FastA
     app.include_router(session_routes.router)
     app.include_router(bmad_routes.router)
     app.include_router(changes_routes.router)
+    app.include_router(projects_routes.router)
     web_routes.mount_assets(app, settings.web_dist)
     web_routes.install_shell(app)  # ต้องอยู่ท้ายสุด: catch-all ของ SPA shell
     return app

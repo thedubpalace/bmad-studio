@@ -16,7 +16,7 @@ from typing import Any
 from bmad_studio.core.errors import StudioError
 from bmad_studio.core.flow import policy
 from bmad_studio.core.flow.merge import Effective, FlowInvalid, effective_for
-from bmad_studio.core.flow.schema import Track
+from bmad_studio.core.flow.schema import Flow, Track
 from bmad_studio.core.flow.status import (
     ACTIVE,
     DEVELOPED_STATUSES,
@@ -71,6 +71,8 @@ def resolve_track(effective: Effective, track_name: str, state: ProjectState) ->
     by_id = {s.id: s for s in track.stages}
     order = topo_order(track)
     overridden = effective.overridden.get(track_name, set())
+    base_track = effective.default.tracks.get(track_name)
+    base_by_id = {s.id: s for s in base_track.stages} if base_track is not None else {}
     rows: dict[str, dict[str, Any]] = {}
     warnings: list[dict[str, str]] = []
     for sid in order:
@@ -92,6 +94,8 @@ def resolve_track(effective: Effective, track_name: str, state: ProjectState) ->
             "enabled": stage.enabled, "optional": stage.optional, "condition": stage.condition,
             "status": status, "skipReason": reason, "note": note,
             "locked": lock is not None, "lockReason": lock, "overridden": sid in overridden,
+            # ค่าของขั้นนี้ใน default (None = ขั้นที่ overlay เพิ่ม) — AD-12
+            "default": base_by_id[sid].model_dump(exclude={"id"}) if sid in base_by_id else None,
         }
     # gate ของคนที่ขั้นก่อนหน้าเสร็จแล้ว = กำลังรอคน (active)
     for sid in order:
@@ -182,12 +186,19 @@ def resolve_project(paths: VedaPaths, project: str, track: str = policy.FULL,
                     catalog: Catalog | None = None) -> dict[str, Any]:
     """ผลของ ``flow resolve`` — raise :class:`FlowInvalid` เมื่อ flow ผิด, :class:`StudioError` เมื่อหาโปรเจกต์ไม่เจอ."""
     entry = find_project(paths, project)
-    catalog = catalog if catalog is not None else Catalog.scan(paths)
-    effective = effective_for(paths, project, catalog)
+    return resolve_entry(paths, entry, track, catalog if catalog is not None else Catalog.scan(paths))
+
+
+def resolve_entry(paths: VedaPaths, entry: dict[str, Any], track: str, catalog: Catalog,
+                  loaded_default: tuple[Flow, str] | None = None) -> dict[str, Any]:
+    """resolve ของ registry entry ที่หาไว้แล้ว — ฟังก์ชันเดียวที่ CLI และ API ใช้ (AD-1)."""
+    project = str(entry["name"])
+    effective = effective_for(paths, project, catalog, loaded_default)
     state = load_state(paths, entry)
     result = resolve_track(effective, track, state)
     return {
         "project": project,
+        "hasSprint": state.has_sprint,
         "flow": {"default": effective.default_source, "overlay": effective.overlay_source},
         "registry": {k: entry.get(k) for k in ("status", "requirementsReady", "designReady", "planReady", "hasFrontend")},
         **result,
@@ -226,4 +237,41 @@ def render_text(result: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-__all__ = ["FlowInvalid", "render_text", "resolve_project", "resolve_track", "topo_order"]
+def overview(paths: VedaPaths) -> list[dict[str, Any]]:
+    """ทุกโปรเจกต์ใน registry พร้อม next/สถานะต่อขั้น (track full) — scan catalog และโหลด default ครั้งเดียว.
+
+    flow ของโปรเจกต์ใดผิด = รายการนั้นมี ``error`` (ไม่ทำให้ทั้งรายการล้ม); default ผิด = ทุกรายการมี ``error``.
+    """
+    from bmad_studio.core.flow.merge import load_default
+    from bmad_studio.core.flow.status import read_registry
+
+    catalog = Catalog.scan(paths)
+    loaded: tuple[Flow, str] | None = None
+    default_error: dict[str, Any] | None = None
+    try:
+        loaded = load_default(paths, catalog)
+    except FlowInvalid as exc:
+        default_error = {"code": "flow_invalid", "source": exc.source, "issues": exc.issues}
+    items = []
+    for entry in read_registry(paths):
+        base = {"project": entry["name"], "description": entry.get("description") if isinstance(
+            entry.get("description"), str) else None, "status": entry.get("status") if isinstance(
+            entry.get("status"), str) else None}
+        error = default_error
+        if error is None:
+            try:
+                result = resolve_entry(paths, entry, policy.FULL, catalog, loaded)
+            except FlowInvalid as exc:
+                error = {"code": "flow_invalid", "source": exc.source, "issues": exc.issues}
+        if error is not None:
+            items.append({**base, "error": error, "next": None, "stages": [], "overridden": False, "complete": False})
+            continue
+        items.append({**base, "error": None, "next": result["next"], "complete": result["complete"],
+                      # ป้าย "ปรับเอง" เมื่อ overlay เปลี่ยนอะไรจริง (ไฟล์ที่มีแค่ extends: default ไม่นับ)
+                      "overridden": any(s["overridden"] for s in result["stages"]),
+                      "stages": [{"id": s["id"], "agent": s["agent"], "status": s["status"],
+                                  "skipReason": s["skipReason"], "gate": s["gate"]} for s in result["stages"]]})
+    return items
+
+
+__all__ = ["FlowInvalid", "overview", "render_text", "resolve_entry", "resolve_project", "resolve_track", "topo_order"]
