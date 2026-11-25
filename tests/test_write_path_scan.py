@@ -72,7 +72,7 @@ def test_scanner_detects_planted_usage() -> None:
 # -- N-scan (review epic 2): primitive เขียน/ย้าย/ลบไฟล์แบบดิบในโมดูลอื่น --
 # ยกเว้นเฉพาะ: adapters/fs.py (ตัวเขียนไฟล์ภายนอก), adapters/state.py และ api/audit.py (.runtime ของแอปเอง),
 # cli/main.py (export schema ตาม path ที่ผู้ใช้ CLI ระบุ — ไม่มีทางเข้าจาก HTTP)
-RAW_WRITE_ALLOWED = {
+RAW_WRITE_ALLOWED = {  # ยกเว้นที่ตั้งใจ (ดูคำอธิบายด้านบน)
     SRC / "adapters" / "fs.py",
     SRC / "adapters" / "state.py",
     SRC / "api" / "audit.py",
@@ -101,46 +101,95 @@ def _writes(mode: str | None) -> bool:
     return mode == "?" or (mode is not None and bool(set(mode) & _MODES_WRITE))
 
 
+_WATCHED_MODULES = {"os", "shutil", "tempfile", "pathlib", "zipfile", "tarfile"}
+_ARCHIVE_CTORS = {"ZipFile", "PyZipFile", "open", "TarFile"}
+_ARCHIVE_EXTRACT = {"extractall", "extract"}
+
+
+def _const_str(node: ast.AST) -> str:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else "?"
+
+
+def _archive_mode(call: ast.Call, position: int) -> str:
+    """mode ของ ZipFile(file, mode)/tarfile.open(name, mode); ไม่ระบุ = "r" (อ่าน)."""
+    for kw in call.keywords:
+        if kw.arg == "mode":
+            return _const_str(kw.value)
+    if len(call.args) > position:
+        return _const_str(call.args[position])
+    return "r"
+
+
+def _archive_writes(mode: str) -> bool:
+    return mode == "?" or bool(set(mode.split(":")[0]) & set("wax"))
+
+
 def raw_write_calls(source: str) -> list[str]:
+    """primitive ที่เขียน/ย้าย/ลบไฟล์แบบดิบ (epic 2 retro item 1).
+
+    ครอบคลุม: open/Path.open mode เขียน, Path.write_*/unlink/mkdir/..., Path.rename(x)/Path.replace(x)
+    (ชี้ด้วยจำนวน argument: str.replace มี ≥ 2 argument เสมอ), os.*/shutil.*/tempfile.* รวม alias
+    (``import os as o``, ``from os import replace as r``), zipfile/tarfile ที่เปิดแบบเขียนและ extract/extractall.
+    """
     hits: list[str] = []
     tree = ast.parse(source)
-    imported: set[str] = set()
+    imported: set[str] = set()       # ชื่อฟังก์ชันเขียนที่ import ตรง
+    archive_ctors: set[str] = set()  # ZipFile/TarFile ที่ import ตรง
+    aliases: dict[str, str] = {}     # ชื่อใน module → module จริง
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module in {"os", "shutil", "tempfile", "pathlib"}:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in _WATCHED_MODULES and (alias.asname or "." not in alias.name):
+                    aliases[alias.asname or root] = alias.name if alias.asname else root
+        elif isinstance(node, ast.ImportFrom) and node.module in _WATCHED_MODULES:
             for alias in node.names:
                 name = alias.asname or alias.name
                 if (node.module == "os" and alias.name in _OS_CALLS) or (
                         node.module == "shutil" and alias.name in _SHUTIL_WRITES) or node.module == "tempfile":
                     imported.add(name)
                     hits.append(f"{node.lineno}:from {node.module} import {alias.name}")
+                elif node.module in {"zipfile", "tarfile"} and alias.name in _ARCHIVE_CTORS:
+                    archive_ctors.add(name)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
         if isinstance(func, ast.Name) and func.id in imported:
             hits.append(f"{node.lineno}:{func.id}()")
+        elif isinstance(func, ast.Name) and func.id in archive_ctors:
+            if _archive_writes(_archive_mode(node, 1)):
+                hits.append(f"{node.lineno}:{func.id}(write)")
         elif isinstance(func, ast.Name) and func.id == "open":
             if _writes(_mode_of(node)):
                 hits.append(f"{node.lineno}:open({_mode_of(node)})")
         elif isinstance(func, ast.Attribute):
             owner = func.value.id if isinstance(func.value, ast.Name) else ""
-            if owner == "shutil" and func.attr in _SHUTIL_WRITES:
+            module = aliases.get(owner, owner if owner in _WATCHED_MODULES else "")
+            if module == "shutil" and func.attr in _SHUTIL_WRITES:
                 hits.append(f"{node.lineno}:shutil.{func.attr}")
-            elif owner == "tempfile":
+            elif module == "tempfile":
                 hits.append(f"{node.lineno}:tempfile.{func.attr}")
-            elif owner == "os" and func.attr in _OS_CALLS:
+            elif module == "os" and func.attr in _OS_CALLS:
                 hits.append(f"{node.lineno}:os.{func.attr}")
+            elif module in {"zipfile", "tarfile"} and func.attr in _ARCHIVE_CTORS:
+                if _archive_writes(_archive_mode(node, 1)):
+                    hits.append(f"{node.lineno}:{module}.{func.attr}(write)")
+            elif func.attr in _ARCHIVE_EXTRACT:
+                hits.append(f"{node.lineno}:.{func.attr}")
+            elif func.attr in {"rename", "replace"} and len(node.args) + len(node.keywords) == 1:
+                # Path.rename(target)/Path.replace(target); str.replace(old, new) มี ≥ 2 argument
+                hits.append(f"{node.lineno}:.{func.attr}(path)")
             elif func.attr in _WRITE_METHODS:
                 hits.append(f"{node.lineno}:.{func.attr}")
             elif func.attr == "open":
                 # Path.open(mode) — mode เป็น argument ตัวแรก
                 mode: str | None = None
                 if node.args:
-                    arg = node.args[0]
-                    mode = arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str) else "?"
+                    mode = _const_str(node.args[0])
                 for kw in node.keywords:
                     if kw.arg == "mode":
-                        mode = kw.value.value if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str) else "?"
+                        mode = _const_str(kw.value)
                 if _writes(mode):
                     hits.append(f"{node.lineno}:.open({mode})")
     return hits
@@ -167,6 +216,18 @@ def test_raw_scanner_detects_planted_writes() -> None:
         "from shutil import move as mv\nmv(a, b)": True, "tempfile.NamedTemporaryFile(delete=False)": True,
         "from os import path": False,
         "open('x')": False, "open('x', 'rb')": False, "p.read_text()": False, "os.path.join(a, b)": False,
+        # epic 2 retro item 1: Path.rename/replace, alias ของ os, zipfile/tarfile
+        "p.rename(q)": True, "Path('a').replace(Path('b'))": True, "p.replace(target=q)": True,
+        "s.replace('a', 'b')": False, "text.replace('\\r\\n', '\\n').strip()": False, "s.replace(a, b, 1)": False,
+        "import os as o\no.replace(a, b)": True, "import os as o\no.remove(a)": True, "import shutil as sh\nsh.move(a, b)": True,
+        "import tempfile as tf\ntf.mkstemp()": True, "import os as o\no.path.join(a, b)": False,
+        "import os.path as osp\nosp.join(a, b)": False,
+        "import zipfile\nzipfile.ZipFile(p, 'w')": True, "import zipfile\nzipfile.ZipFile(p, mode='a')": True,
+        "import zipfile as z\nz.ZipFile(p, m)": True, "import zipfile\nzipfile.ZipFile(p)": False,
+        "from zipfile import ZipFile\nZipFile(p, 'x')": True, "from zipfile import ZipFile as Z\nZ(p, 'w')": True,
+        "from zipfile import ZipFile\nZipFile(p, 'r')": False, "zf.extractall(d)": True, "zf.extract(m, d)": True,
+        "import tarfile\ntarfile.open(p, 'w:gz')": True, "import tarfile\ntarfile.open(p)": False,
+        "import tarfile\ntarfile.open(p, mode='r:gz')": False,
     }
     for source, expected in planted.items():
         assert bool(raw_write_calls(source)) is expected, source
