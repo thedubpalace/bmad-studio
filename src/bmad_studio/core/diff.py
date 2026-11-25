@@ -16,7 +16,19 @@ _TOKEN = re.compile(r"\w+|\s+|[^\w\s]", re.UNICODE)
 # (วัดบนเครื่องนี้: 300x300 บรรทัดซ้ำ ~0.08 วินาที, 800x800 ~1.6 วินาที)
 MAX_EXACT_WORK = 90_000
 MAX_WORD_WORK = 10_000
+# งาน word diff รวมทั้ง diff (ผลรวม len(a)*len(b) ของทุกคู่บรรทัด) — เกินแล้วคู่ที่เหลือ highlight ทั้งบรรทัด
+MAX_WORD_TOTAL = 2_000_000
+MAX_WORD_LINE_CHARS = 4_000
+# ขนาดผลลัพธ์: diff ที่ใหญ่กว่านี้ไม่ส่งรายบรรทัด (คืนสรุป + truncated) — ผู้ใช้ตรวจไม่ได้จริงอยู่แล้ว
+MAX_DIFF_LINES = 10_000
+MAX_DIFF_CHARS = 1_000_000
 _MAX_DEPTH = 40
+# อักขระที่ JSON ต้อง escape (ขยายได้ถึง 6 เท่า: \u0001) — นับน้ำหนักเพิ่มใน MAX_DIFF_CHARS
+_JSON_ESCAPED = re.compile(r'[\x00-\x1f"\\\x7f]')
+
+
+def _weight(line: str) -> int:
+    return len(line) + 5 * len(_JSON_ESCAPED.findall(line)) if _JSON_ESCAPED.search(line) else len(line)
 
 Opcode = tuple[str, int, int, int, int]
 
@@ -105,7 +117,34 @@ def line_opcodes(a: list[str], b: list[str]) -> list[Opcode]:
     return merged
 
 
+def grouped_opcodes(codes: list[Opcode], n: int = CONTEXT) -> list[list[Opcode]]:
+    """เหมือน ``SequenceMatcher.get_grouped_opcodes`` แต่รับ opcode ที่คำนวณแล้ว
+    (ไม่สร้าง index ของ b ทั้งไฟล์แบบที่ SequenceMatcher ทำตอน init)."""
+    codes = list(codes) or [("equal", 0, 1, 0, 1)]
+    if codes[0][0] == "equal":
+        tag, i1, i2, j1, j2 = codes[0]
+        codes[0] = tag, max(i1, i2 - n), i2, max(j1, j2 - n), j2
+    if codes[-1][0] == "equal":
+        tag, i1, i2, j1, j2 = codes[-1]
+        codes[-1] = tag, i1, min(i2, i1 + n), j1, min(j2, j1 + n)
+    nn = n + n
+    groups: list[list[Opcode]] = []
+    group: list[Opcode] = []
+    for tag, i1, i2, j1, j2 in codes:
+        if tag == "equal" and i2 - i1 > nn:
+            group.append((tag, i1, min(i2, i1 + n), j1, min(j2, j1 + n)))
+            groups.append(group)
+            group = []
+            i1, j1 = max(i1, i2 - n), max(j1, j2 - n)
+        group.append((tag, i1, i2, j1, j2))
+    if group and not (len(group) == 1 and group[0][0] == "equal"):
+        groups.append(group)
+    return groups
+
+
 class _BoundedMatcher(difflib.SequenceMatcher):
+    """เก็บไว้ให้โค้ดเดิมที่อาจเรียก — unified ใช้ :func:`grouped_opcodes` ตรง ๆ."""
+
     def get_opcodes(self):  # type: ignore[override]
         if self.opcodes is None:
             self.opcodes = line_opcodes(list(self.a), list(self.b))
@@ -121,11 +160,32 @@ def _lines(text: str) -> list[str]:
     return lines
 
 
-def _word_spans(old: str, new: str) -> tuple[list[list[int]], list[list[int]]]:
-    """ช่วงอักขระ [start, end) ที่ต่างกันในแต่ละฝั่ง."""
+def _whole(old: str, new: str) -> tuple[list[list[int]], list[list[int]]]:
+    return ([[0, len(old)]] if old else []), ([[0, len(new)]] if new else [])
+
+
+class _WordBudget:
+    def __init__(self, total: int) -> None:
+        self.left = total
+
+    def take(self, work: int) -> bool:
+        if work > self.left:
+            self.left = 0
+            return False
+        self.left -= work
+        return True
+
+
+def _word_spans(old: str, new: str, budget: _WordBudget | None = None) -> tuple[list[list[int]], list[list[int]]]:
+    """ช่วงอักขระ [start, end) ที่ต่างกันในแต่ละฝั่ง (ใช้ budget รวมของทั้ง diff)."""
+    if len(old) > MAX_WORD_LINE_CHARS or len(new) > MAX_WORD_LINE_CHARS:
+        return _whole(old, new)
+    if budget is not None and budget.left <= 0:
+        return _whole(old, new)
     a, b = _TOKEN.findall(old), _TOKEN.findall(new)
-    if len(a) * len(b) > MAX_WORD_WORK:
-        return ([[0, len(old)]] if old else []), ([[0, len(new)]] if new else [])
+    work = len(a) * len(b)
+    if work > MAX_WORD_WORK or (budget is not None and not budget.take(work)):
+        return _whole(old, new)
     matcher = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
     a_pos = [0]
     for token in a:
@@ -152,10 +212,28 @@ def unified(old_text: str, new_text: str, context: int = CONTEXT) -> dict[str, A
     และ ``lines``: ``{"type": "context"|"add"|"del", "old": n|None, "new": n|None, "text", "spans"}``.
     """
     a, b = _lines(old_text), _lines(new_text)
-    matcher = _BoundedMatcher(a=a, b=b, autojunk=False)
-    hunks: list[dict[str, Any]] = []
+    groups = grouped_opcodes(line_opcodes(a, b), context)
+    eof = {"old_eof_newline": old_text.endswith(_LF) or not old_text,
+           "new_eof_newline": new_text.endswith(_LF) or not new_text}
+    # นับขนาดก่อนสร้างผลลัพธ์ (ถูก: ไม่สร้าง dict ต่อบรรทัด) — ใหญ่เกิน = คืนสรุปอย่างเดียว
+    total_lines = total_chars = 0
     added = removed = 0
-    for group in matcher.get_grouped_opcodes(context):
+    for group in groups:
+        for tag, a0, a1, b0, b1 in group:
+            if tag == "equal":
+                total_lines += a1 - a0
+                total_chars += sum(_weight(a[i]) for i in range(a0, a1))
+                continue
+            removed += a1 - a0
+            added += b1 - b0
+            total_lines += (a1 - a0) + (b1 - b0)
+            if total_lines <= MAX_DIFF_LINES:
+                total_chars += sum(_weight(a[i]) for i in range(a0, a1)) + sum(_weight(b[j]) for j in range(b0, b1))
+    if total_lines > MAX_DIFF_LINES or total_chars > MAX_DIFF_CHARS:
+        return {"hunks": [], "added": added, "removed": removed, "truncated": True, **eof}
+    budget = _WordBudget(MAX_WORD_TOTAL)
+    hunks: list[dict[str, Any]] = []
+    for group in groups:
         lines: list[dict[str, Any]] = []
         for tag, a0, a1, b0, b1 in group:
             if tag == "equal":
@@ -168,7 +246,7 @@ def unified(old_text: str, new_text: str, context: int = CONTEXT) -> dict[str, A
             pair_spans: dict[tuple[str, int], list[list[int]]] = {}
             if tag == "replace":
                 for i, j in zip(dels, adds):
-                    old_spans, new_spans = _word_spans(a[i], b[j])
+                    old_spans, new_spans = _word_spans(a[i], b[j], budget)
                     pair_spans[("del", i)] = old_spans
                     pair_spans[("add", j)] = new_spans
             for i in dels:
@@ -177,8 +255,6 @@ def unified(old_text: str, new_text: str, context: int = CONTEXT) -> dict[str, A
             for j in adds:
                 lines.append({"type": "add", "old": None, "new": j + 1, "text": b[j],
                               "spans": pair_spans.get(("add", j), [[0, len(b[j])]] if b[j] else [])})
-            removed += len(dels)
-            added += len(adds)
         first, last = group[0], group[-1]
         hunks.append({
             "old_start": first[1] + 1 if last[2] > first[1] else first[1],
@@ -187,6 +263,4 @@ def unified(old_text: str, new_text: str, context: int = CONTEXT) -> dict[str, A
             "new_lines": last[4] - first[3],
             "lines": lines,
         })
-    return {"hunks": hunks, "added": added, "removed": removed,
-            "old_eof_newline": old_text.endswith(_LF) or not old_text,
-            "new_eof_newline": new_text.endswith(_LF) or not new_text}
+    return {"hunks": hunks, "added": added, "removed": removed, "truncated": False, **eof}

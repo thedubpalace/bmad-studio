@@ -99,6 +99,8 @@ class RevertKind:
     """
 
     name = "revert"
+    #: diff ใหญ่เกินแสดงได้ยังคืนค่าได้ — ผลคือฉบับที่ระบบเคยเห็น/สำรองเอง และคืนกลับได้อีกจากประวัติ
+    allow_truncated = True
     rules = frozenset({"agent", "agent-backup", "claude-md", "bmad-custom", "flow-default", "flow-project"})
     check_whitespace = False
 
@@ -241,6 +243,10 @@ class WritePipeline:
         guarded = self.guard.check_writable(request.target)
         if guarded.rule not in handler.rules:
             raise StudioError("path_forbidden", "ไม่อนุญาตให้เขียนไฟล์นี้", 403, {"reason": "kind_rule"})
+        # ตรวจที่ถูกก่อนงานแพง (propose/diff): จำนวน preview ค้าง
+        self.state.sweep_previews(TOKEN_TTL_SECONDS * 2, self.clock())
+        if self.state.count_previews() >= MAX_PREVIEWS:
+            raise StudioError("too_many_previews", "มีตัวอย่างการแก้ค้างมากเกินไป รอสักครู่แล้วลองใหม่", 429)
         current = fs.read_doc(guarded.path, self.max_bytes)
         if request.base_sha256 != current.sha256:
             raise StudioError("conflict", "ไฟล์ถูกแก้จากภายนอกระหว่างที่คุณแก้ โหลดใหม่ก่อน", 409,
@@ -259,13 +265,20 @@ class WritePipeline:
         try:
             diff = unified(current.text, "" if delete else fs.decode(proposal.proposed).text)
         except StudioError:  # ผลลัพธ์ไม่ใช่ข้อความ — ไม่แสดง diff ที่ทำให้เข้าใจผิด
-            diff = {"hunks": [], "added": 0, "removed": 0, "old_eof_newline": True, "new_eof_newline": True}
+            diff = {"hunks": [], "added": 0, "removed": 0, "truncated": False,
+                    "old_eof_newline": True, "new_eof_newline": True}
             if not errors:
                 errors.append({"code": "unsupported_encoding", "error": "ผลลัพธ์ไม่ใช่ข้อความ UTF-8"})
+        warnings = list(proposal.warnings)
+        if diff.get("truncated"):
+            if getattr(handler, "allow_truncated", False):
+                warnings.append({"code": "diff_summary_only",
+                                 "error": "diff ใหญ่เกินจะแสดงรายบรรทัด — การคืนค่านี้ย้อนกลับได้จากประวัติ"})
+            else:
+                # ผู้ใช้ต้องเห็นสิ่งที่จะเขียน (AD-5) — diff ที่ใหญ่เกินแสดงไม่ได้จึงบันทึกไม่ได้
+                errors.append({"code": "diff_too_large",
+                               "error": "การเปลี่ยนแปลงใหญ่เกินกว่าจะแสดงให้ตรวจได้ — แบ่งแก้เป็นส่วนเล็กลง"})
         now = self.clock()
-        self.state.sweep_previews(TOKEN_TTL_SECONDS * 2, now)
-        if self.state.count_previews() >= MAX_PREVIEWS:
-            raise StudioError("too_many_previews", "มีตัวอย่างการแก้ค้างมากเกินไป รอสักครู่แล้วลองใหม่", 429)
         preview_id = uuid.uuid4().hex
         expiry = int(now) + TOKEN_TTL_SECONDS
         meta: dict[str, Any] = {
@@ -274,15 +287,17 @@ class WritePipeline:
             "base_sha256": current.sha256, "proposed_sha256": _sha(proposal.proposed),
             "extra": proposal.extra,
             "impact": impact_for(guarded.rule), "confirm_phrase": confirm_phrase(guarded),
-            "errors": errors, "warnings": proposal.warnings, "added": diff["added"], "removed": diff["removed"],
+            "errors": errors, "warnings": warnings, "added": diff["added"], "removed": diff["removed"],
             "expiry": expiry, "actor": actor, "created_at": utc_iso(now),
         }
+        if self.state.count_previews() >= MAX_PREVIEWS:  # ตรวจซ้ำหลังงานแพง (คำขอพร้อมกัน)
+            raise StudioError("too_many_previews", "มีตัวอย่างการแก้ค้างมากเกินไป รอสักครู่แล้วลองใหม่", 429)
         self.state.save_preview(preview_id, meta, b"" if delete else proposal.proposed)
         return {
             "preview_id": preview_id, "path": guarded.rel, "kind": request.kind, "op": meta["op"],
             "impact": meta["impact"], "confirm_phrase": meta["confirm_phrase"] if meta["impact"] == "high" else None,
             "base_sha256": current.sha256, "proposed_sha256": meta["proposed_sha256"],
-            "diff": diff, "warnings": proposal.warnings, "errors": errors,
+            "diff": diff, "warnings": warnings, "errors": errors,
             "confirm_token": self._token(meta, session_fp), "expires_at": utc_iso(expiry),
         }
 

@@ -30,18 +30,17 @@ _BOMS: tuple[tuple[bytes, str | None], ...] = (
     (codecs.BOM_UTF16_LE, "utf-16-le"),
     (codecs.BOM_UTF16_BE, "utf-16-be"),
 )
-_LINE = re.compile(r"([^\r\n]*)(\r\n|\n|\r|)")
+_EOL = re.compile(r"(\r\n|\n|\r)")
 
 
 def _split(text: str) -> list[tuple[str, str]]:
-    """แยกเป็น (เนื้อหา, EOL) — EOL ว่างได้เฉพาะบรรทัดสุดท้าย."""
-    lines: list[tuple[str, str]] = []
-    pos = 0
-    while pos < len(text):
-        match = _LINE.match(text, pos)
-        assert match is not None
-        lines.append((match.group(1), match.group(2)))
-        pos = match.end()
+    """แยกเป็น (เนื้อหา, EOL) — EOL ว่างได้เฉพาะบรรทัดสุดท้าย (re.split ทำงานใน C: เร็วกับไฟล์ 2 MiB)."""
+    parts = _EOL.split(text)
+    contents, eols = parts[0::2], parts[1::2]
+    eols.append("")
+    lines = list(zip(contents, eols))
+    if lines and lines[-1] == ("", ""):
+        lines.pop()
     return lines
 
 

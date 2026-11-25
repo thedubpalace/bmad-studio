@@ -270,3 +270,17 @@ def test_revert_into_missing_folder_is_blocked_at_preview(studio: Studio, veda_r
     shutil.rmtree(veda_root / "_bmad" / "custom")
     preview = revert_preview(studio, CUSTOM, entry["change_id"], None).json()["data"]
     assert "parent_missing" in [e["code"] for e in preview["errors"]]
+
+
+def test_revert_of_a_huge_change_is_allowed_with_a_summary(studio: Studio, veda_root: Path) -> None:
+    small = b"x = 1\n"
+    (veda_root / CUSTOM).write_bytes(small)
+    big = "".join(f"k{i} = {i}\n" for i in range(12_000))
+    # เขียนไฟล์ใหญ่ผ่าน text ไม่ได้ (diff ใหญ่เกินตรวจ) — สร้างสถานการณ์ด้วยการเขียนตรงใน tmp veda แล้ว revert
+    entry = write(studio, CUSTOM, "x = 2\n", sha(small))
+    (veda_root / CUSTOM).write_bytes(big.encode())
+    preview = revert_preview(studio, CUSTOM, entry["change_id"], sha(big.encode())).json()["data"]
+    assert preview["diff"]["truncated"] is True and preview["errors"] == []
+    assert "diff_summary_only" in [w["code"] for w in preview["warnings"]]
+    assert studio.commit(preview).status_code == 200
+    assert (veda_root / CUSTOM).read_bytes() == small

@@ -95,6 +95,7 @@ export interface Diff {
   hunks: Array<DiffHunk>;
   added: number;
   removed: number;
+  truncated?: boolean;
   old_eof_newline?: boolean;
   new_eof_newline?: boolean;
 }

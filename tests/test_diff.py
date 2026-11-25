@@ -115,3 +115,87 @@ def test_thai_word_spans() -> None:
     diff = unified("ภาษา: ไทย\n", "ภาษา: อังกฤษ\n")
     lines = diff["hunks"][0]["lines"]
     assert lines[1]["text"][slice(*lines[1]["spans"][0])] == "อังกฤษ"
+
+
+# -- N-DoS regression (review epic 2): ขอบเขตของขนาดผลลัพธ์และงาน word diff รวม (ไม่ใช่เวลา) --
+
+def test_small_old_huge_new_returns_a_bounded_summary() -> None:
+    import json
+
+    from bmad_studio.core import diff as diff_module
+
+    old = "".join(f"line {i} of the agent body text here\n" for i in range(200))
+    new = "x\n" * (1024 * 1024 - 10)
+    result = unified(old, new)
+    assert result["truncated"] is True and result["hunks"] == []
+    assert result["added"] == 1024 * 1024 - 10 and result["removed"] == 200
+    assert len(json.dumps(result)) < 1_000
+    assert diff_module.MAX_DIFF_LINES <= 10_000
+
+
+def test_wordy_diff_is_truncated_by_line_cap() -> None:
+    old = "\n".join(" ".join(["w"] * 50) for _ in range(200)) + "\n"
+    new = "\n".join("v " + " ".join(["w"] * 49) for _ in range(20000)) + "\n"
+    result = unified(old, new)
+    assert result["truncated"] is True and result["hunks"] == []
+
+
+def test_total_word_diff_work_is_bounded(monkeypatch) -> None:
+    from bmad_studio.core import diff as diff_module
+
+    work: list[int] = []
+    real = diff_module.difflib.SequenceMatcher
+
+    class Counting(real):  # type: ignore[misc, valid-type]
+        def __init__(self, isjunk=None, a="", b="", autojunk=True):
+            work.append(len(a) * len(b))
+            super().__init__(isjunk, a, b, autojunk)
+
+    monkeypatch.setattr(diff_module.difflib, "SequenceMatcher", Counting)
+    old = "\n".join(f"a{i} " + " ".join(["w"] * 40) for i in range(3000)) + "\n"
+    new = "\n".join(f"b{i} " + " ".join(["v"] * 40) for i in range(3000)) + "\n"
+    result = unified(old, new)
+    assert result["truncated"] is False and result["added"] == 3000
+    # ไม่มี budget = 3000 คู่ × ~6,500 = ~19.5M; มี budget ต้องไม่เกินเพดานรวม
+    assert sum(work) <= diff_module.MAX_WORD_TOTAL
+    lines = result["hunks"][0]["lines"]
+    assert lines[0]["spans"] and lines[-1]["spans"] == [[0, len(lines[-1]["text"])]]  # เกิน budget = ทั้งบรรทัด
+
+
+def test_very_long_line_skips_word_diff() -> None:
+    old = "a" * 50_000 + "\n"
+    new = "a" * 49_999 + "b\n"
+    lines = unified(old, new)["hunks"][0]["lines"]
+    assert lines[0]["spans"] == [[0, 50_000]]
+
+
+def test_char_cap_truncates_huge_lines() -> None:
+    result = unified("a\n", "b" * 1_500_000 + "\n")
+    assert result["truncated"] is True
+
+
+def test_grouped_opcodes_matches_difflib() -> None:
+    import difflib
+    import random
+
+    from bmad_studio.core.diff import grouped_opcodes
+
+    rng = random.Random(11)
+    for _ in range(300):
+        a = [rng.choice("abcdefgh") for _ in range(rng.randint(0, 40))]
+        b = [rng.choice("abcdefgh") for _ in range(rng.randint(0, 40))]
+        matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
+        for n in (0, 1, 3):
+            assert grouped_opcodes(matcher.get_opcodes(), n) == [list(g) for g in matcher.get_grouped_opcodes(n)]
+
+
+def test_char_cap_counts_json_escaping() -> None:
+    import json
+
+    from bmad_studio.core import diff as diff_module
+
+    assert diff_module._weight('a"b' + chr(92) + chr(1)) == 5 + 3 * 5
+    new = "".join(chr(1) * 99 + "\n" for _ in range(9_990))
+    result = unified("a\n", new)
+    assert result["truncated"] is True
+    assert len(json.dumps(result)) < 1_000

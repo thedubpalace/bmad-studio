@@ -531,3 +531,30 @@ def test_adversarial_diff_preview_is_fast(studio: Studio, veda_root: Path) -> No
     response = studio.preview(CUSTOM, new, sha(old))
     assert response.status_code == 200
     assert time.perf_counter() - start < 5.0
+
+
+def test_huge_preview_is_a_small_response_that_cannot_be_committed(studio: Studio, veda_root: Path) -> None:
+    raw = "".join(f"line {i} of the agent body text here\n" for i in range(200)).encode()
+    (veda_root / CUSTOM).write_bytes(raw)
+    response = studio.preview(CUSTOM, "x\n" * (1024 * 1024 - 10), sha(raw))
+    assert response.status_code == 200
+    assert len(response.content) < 20_000  # เดิม 69 MB
+    data = response.json()["data"]
+    assert data["diff"]["truncated"] is True and "diff_too_large" in [e["code"] for e in data["errors"]]
+    assert studio.commit(data).status_code == 422
+    assert (veda_root / CUSTOM).read_bytes() == raw
+
+
+def test_preview_cap_is_checked_before_any_diff_work(studio: Studio, veda_root: Path,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    from bmad_studio.core import writes
+
+    monkeypatch.setattr(writes, "MAX_PREVIEWS", 0)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("diff ต้องไม่ถูกเรียกเมื่อเกินจำนวน preview")
+
+    monkeypatch.setattr(writes, "unified", boom)
+    monkeypatch.setattr(writes.TextKind, "propose", boom)
+    response = studio.preview(CUSTOM, "x = 1\n", None)
+    assert response.status_code == 429

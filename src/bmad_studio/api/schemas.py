@@ -92,6 +92,7 @@ class Diff(BaseModel):
     hunks: list[DiffHunk]
     added: int
     removed: int
+    truncated: bool = False  # true = ใหญ่เกินจะแสดงรายบรรทัด (hunks ว่าง, มีแค่ added/removed)
     old_eof_newline: bool = True  # false = ไม่มี newline ท้ายไฟล์ (UI แสดงป้าย)
     new_eof_newline: bool = True
 
