@@ -1,0 +1,96 @@
+# flow เริ่มต้นของ Veda — เทียบเท่า "ลำดับวงจรพัฒนา" ใน CLAUDE.md ของ veda (REQ-045 b)
+# ลำดับมาจาก after เท่านั้น (ไม่ใช่ตำแหน่งในรายการ); เอกสาร: docs/flow.md
+# ขั้น requirements-review และ entry_condition ของ quick ถูกล็อกในโค้ด (AD-8) — แก้ที่นี่ไม่มีผล นอกจากทำให้ไฟล์ผิดกฎ
+version: 1
+tracks:
+  full:
+    stages:
+      - id: bootstrap
+        agent: project-bootstrapper
+        enabled: true
+        optional: false
+        after: []
+        gate: none
+        produces: []
+      - id: requirements
+        agent: ba
+        enabled: true
+        optional: false
+        after: [bootstrap]
+        gate: none
+        produces: []
+      - id: requirements-review
+        agent: human
+        enabled: true
+        optional: false
+        after: [requirements]
+        gate: human
+        produces: [requirementsReady]
+      - id: ux-design
+        agent: ux-designer
+        enabled: true
+        optional: false
+        after: [requirements-review]
+        gate: none
+        produces: [designReady]
+        condition: hasFrontend
+      - id: architecture
+        agent: architect
+        skill: bmad-architecture
+        enabled: true
+        optional: false
+        after: [ux-design]
+        gate: none
+        produces: [planReady]
+      - id: develop
+        agent: developer
+        skill: bmad-build
+        enabled: true
+        optional: false
+        after: [architecture]
+        gate: none
+        produces: []
+      - id: review
+        agent: reviewer
+        skill: bmad-code-review
+        enabled: true
+        optional: false
+        after: [develop]
+        gate: agent-confirm
+        produces: []
+      - id: retrospective
+        agent: reviewer
+        skill: bmad-retrospective
+        enabled: true
+        optional: false
+        after: [review]
+        gate: none
+        produces: []
+      - id: devops
+        agent: devops
+        enabled: true
+        optional: true
+        after: [retrospective]
+        gate: none
+        produces: []
+  quick:
+    entry_condition:
+      requirementsReady: true
+      status: [developing, developed, running, deployed]
+    stages:
+      - id: develop
+        agent: developer
+        skill: bmad-build
+        enabled: true
+        optional: false
+        after: []
+        gate: none
+        produces: []
+      - id: review
+        agent: reviewer
+        skill: bmad-code-review
+        enabled: true
+        optional: false
+        after: [develop]
+        gate: agent-confirm
+        produces: []

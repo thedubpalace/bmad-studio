@@ -29,7 +29,12 @@ from bmad_studio.adapters import fs
 from bmad_studio.adapters.state import RuntimeState, valid_id
 from bmad_studio.core.diff import unified
 from bmad_studio.core.errors import StudioError
-from bmad_studio.core.path_guard import GuardedPath, PathGuard
+from bmad_studio.core.path_guard import FLOW_RULES, GuardedPath, PathGuard
+
+#: validator ต่อ rule ของ path guard: bytes ที่จะเขียน → issues (ว่าง = ผ่าน)
+FileValidator = Callable[[bytes], list[dict[str, str]]]
+#: rule ที่ต้องมี validator — ไม่มี = ปฏิเสธการเขียน (fail closed, AD-8)
+VALIDATED_RULES = FLOW_RULES
 
 TOKEN_TTL_SECONDS = 10 * 60
 HISTORY_LIMIT = 500
@@ -95,7 +100,8 @@ class RevertKind:
     - เดิมมีไฟล์: proposed = ``original.bin`` ตรง ๆ (ไม่ผ่าน text) → byte-for-byte
     - เดิมไม่มีไฟล์ (รายการนั้นสร้างไฟล์): ย้ายไฟล์ปัจจุบันไป backup ของรายการใหม่
     - ไฟล์ถูกแก้ต่อหลังรายการนั้น: ``warnings[]`` (ยังคืนค่าได้)
-    impact เท่ากับไฟล์เป้าหมาย (AD-5). validator ของ flow/CLAUDE.md (epic 3/5) ต้องตรวจ revert ด้วย.
+    impact เท่ากับไฟล์เป้าหมาย (AD-5). bytes ที่จะคืนผ่าน validator ต่อ rule ของ :class:`WritePipeline`
+    เหมือนทุก kind — ฉบับสำรองอาจเป็นฉบับที่ถูกแก้มือให้ข้าม gate.
     """
 
     name = "revert"
@@ -186,12 +192,13 @@ def _whitespace_errors(current: fs.TextDoc, proposed: bytes) -> list[dict[str, s
 class WritePipeline:
     def __init__(self, guard: PathGuard, state: RuntimeState, secret: str,
                  kinds: Mapping[str, KindHandler], *, clock: Callable[[], float] = time.time,
-                 max_bytes: int = fs.MAX_BYTES) -> None:
+                 max_bytes: int = fs.MAX_BYTES, validators: Mapping[str, FileValidator] | None = None) -> None:
         if len(secret) < 32:
             raise ValueError("secret ต้องยาวอย่างน้อย 32 ตัวอักษร")
         self.guard = guard
         self.state = state
         self.kinds = dict(kinds)
+        self.validators = dict(validators or {})
         self.clock = clock
         self.max_bytes = max_bytes
         self._key = hmac.new(secret.encode(), _TOKEN_CONTEXT, hashlib.sha256).digest()
@@ -230,6 +237,15 @@ class WritePipeline:
         if expiry < self.clock():
             raise StudioError("confirm_expired", "การยืนยันหมดอายุ เปิดตัวอย่างการแก้ใหม่", 403)
 
+    def _validate(self, rule: str, proposed: bytes) -> list[dict[str, str]]:
+        """validator ของ rule นี้ (ทุก kind รวม revert); rule ใน VALIDATED_RULES ที่ไม่มี validator = ปฏิเสธ."""
+        validator = self.validators.get(rule)
+        if validator is not None:
+            return list(validator(proposed))
+        if rule in VALIDATED_RULES:
+            return [{"code": "validator_missing", "error": "ตรวจไฟล์นี้ไม่ได้ จึงบันทึกไม่ได้"}]
+        return []
+
     def _lock(self, path: GuardedPath) -> threading.Lock:
         key = os.path.normcase(os.fspath(path.path))
         with self._locks_guard:
@@ -262,6 +278,8 @@ class WritePipeline:
             errors.append({"code": "parent_missing", "error": "ไม่มีโฟลเดอร์ปลายทาง"})
         if not delete and getattr(handler, "check_whitespace", True):
             errors.extend(_whitespace_errors(current, proposal.proposed))
+        if not delete:
+            errors.extend(self._validate(guarded.rule, proposal.proposed))
         try:
             diff = unified(current.text, "" if delete else fs.decode(proposal.proposed).text)
         except StudioError:  # ผลลัพธ์ไม่ใช่ข้อความ — ไม่แสดง diff ที่ทำให้เข้าใจผิด

@@ -35,6 +35,10 @@ DENY_EXACT: frozenset[str] = frozenset({".veda/projects/registry.json", "_bmad/c
 DENY_BASENAMES: frozenset[str] = frozenset({"customize.toml", "skill.md"})
 
 _SAFE_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+FLOW_DEFAULT_RULE = "flow-default"
+FLOW_PROJECT_RULE = "flow-project"
+#: rule ของไฟล์ flow — ทุกการเขียนต้องผ่าน validator ของ flow (AD-8) ไม่ว่า kind ใด
+FLOW_RULES: frozenset[str] = frozenset({FLOW_DEFAULT_RULE, FLOW_PROJECT_RULE})
 # (rule, regex บน path สัมพัทธ์ posix) — ตรวจแบบ IGNORECASE + ASCII (กัน ſ/K ของ Unicode ที่ match [A-Za-z] เมื่อไม่สนตัวพิมพ์)
 ALLOW_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (name, re.compile(pattern, re.IGNORECASE | re.ASCII))
@@ -43,8 +47,8 @@ ALLOW_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("agent-backup", rf"\.claude/agents/\.backup/(?:{_SAFE_NAME}/)*{_SAFE_NAME}"),
         ("claude-md", r"CLAUDE\.md"),
         ("bmad-custom", rf"_bmad/custom/{_SAFE_NAME}\.toml"),
-        ("flow-default", r"\.veda/flow\.default\.yaml"),
-        ("flow-project", rf"\.veda/projects/{_SAFE_NAME}/flow\.yaml"),
+        (FLOW_DEFAULT_RULE, r"\.veda/flow\.default\.yaml"),
+        (FLOW_PROJECT_RULE, rf"\.veda/projects/{_SAFE_NAME}/flow\.yaml"),
     )
 )
 

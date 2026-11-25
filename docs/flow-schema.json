@@ -1,0 +1,409 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thedubpalace/bmad-studio/docs/flow-schema.json",
+  "title": "bmad-studio flow.yaml",
+  "description": "flow เต็ม (.veda/flow.default.yaml) หรือ overlay ต่อโปรเจกต์ (.veda/projects/<name>/flow.yaml, extends: default)",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Flow"
+    },
+    {
+      "$ref": "#/$defs/Overlay"
+    }
+  ],
+  "$defs": {
+    "EntryCondition": {
+      "additionalProperties": false,
+      "description": "เงื่อนไขเข้า track (เช่น quick) — ค่าที่ยอมรับถูกล็อกใน :mod:`.policy`.",
+      "properties": {
+        "requirementsReady": {
+          "title": "Requirementsready",
+          "type": "boolean"
+        },
+        "status": {
+          "items": {
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Status",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requirementsReady",
+        "status"
+      ],
+      "title": "EntryCondition",
+      "type": "object"
+    },
+    "Flow": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "tracks": {
+          "maxProperties": 8,
+          "minProperties": 1,
+          "patternProperties": {
+            "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$": {
+              "$ref": "#/$defs/Track"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64
+          },
+          "title": "Tracks",
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "version",
+        "tracks"
+      ],
+      "title": "Flow",
+      "type": "object"
+    },
+    "Overlay": {
+      "additionalProperties": false,
+      "properties": {
+        "extends": {
+          "const": "default",
+          "title": "Extends",
+          "type": "string"
+        },
+        "tracks": {
+          "default": {},
+          "maxProperties": 8,
+          "patternProperties": {
+            "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$": {
+              "$ref": "#/$defs/TrackOverlay"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64
+          },
+          "title": "Tracks",
+          "type": "object",
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "extends"
+      ],
+      "title": "Overlay",
+      "type": "object"
+    },
+    "Stage": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "agent": {
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "title": "Agent",
+          "type": "string"
+        },
+        "skill": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skill"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "after": {
+          "default": [],
+          "items": {
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "After",
+          "type": "array"
+        },
+        "gate": {
+          "default": "none",
+          "enum": [
+            "none",
+            "human",
+            "agent-confirm"
+          ],
+          "title": "Gate",
+          "type": "string"
+        },
+        "produces": {
+          "default": [],
+          "items": {
+            "enum": [
+              "requirementsReady",
+              "designReady",
+              "planReady"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Produces",
+          "type": "array"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "enum": [
+                "requirementsReady",
+                "designReady",
+                "planReady",
+                "hasFrontend"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        }
+      },
+      "required": [
+        "id",
+        "agent"
+      ],
+      "title": "Stage",
+      "type": "object"
+    },
+    "StagePatch": {
+      "additionalProperties": false,
+      "description": "field ที่ต่างจาก default ของขั้นเดิม (ไม่มี ``id`` — id คือ key).",
+      "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent"
+        },
+        "skill": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skill"
+        },
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enabled"
+        },
+        "optional": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Optional"
+        },
+        "after": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After"
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "human",
+                "agent-confirm"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gate"
+        },
+        "produces": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "requirementsReady",
+                  "designReady",
+                  "planReady"
+                ],
+                "type": "string"
+              },
+              "maxItems": 3,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Produces"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "enum": [
+                "requirementsReady",
+                "designReady",
+                "planReady",
+                "hasFrontend"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        }
+      },
+      "title": "StagePatch",
+      "type": "object"
+    },
+    "Track": {
+      "additionalProperties": false,
+      "properties": {
+        "entry_condition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntryCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/Stage"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Stages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "stages"
+      ],
+      "title": "Track",
+      "type": "object"
+    },
+    "TrackOverlay": {
+      "additionalProperties": false,
+      "properties": {
+        "entry_condition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntryCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stages": {
+          "default": {},
+          "maxProperties": 64,
+          "patternProperties": {
+            "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$": {
+              "$ref": "#/$defs/StagePatch"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64
+          },
+          "title": "Stages",
+          "type": "object",
+          "additionalProperties": false
+        },
+        "add": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Stage"
+          },
+          "maxItems": 64,
+          "title": "Add",
+          "type": "array"
+        }
+      },
+      "title": "TrackOverlay",
+      "type": "object"
+    }
+  }
+}
