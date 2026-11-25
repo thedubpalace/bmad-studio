@@ -11,8 +11,8 @@ export interface AgentItem {
 export interface ChangeCommit {
   change_id: string;
   path: string;
-  op: "create" | "modify";
-  sha256: string;
+  op: "create" | "modify" | "delete";
+  sha256?: string | null;
   backup: string;
   at: string;
   replayed: boolean;
@@ -23,15 +23,49 @@ export interface ChangeCommitEnvelope {
   data: ChangeCommit;
 }
 
+export interface ChangeDiff {
+  change_id: string;
+  path: string;
+  op: "create" | "modify" | "delete";
+  kind: string;
+  at: string;
+  diff: Diff;
+}
+
+export interface ChangeDiffEnvelope {
+  ok: true;
+  data: ChangeDiff;
+}
+
+export interface ChangeEntry {
+  change_id: string;
+  at: string;
+  path: string;
+  kind: string;
+  op: "create" | "modify" | "delete";
+  added: number;
+  removed: number;
+  impact?: "normal" | "high";
+  reverts?: string | null;
+  new_sha256?: string | null;
+  current_sha256?: string | null;
+  changed_since: boolean;
+}
+
+export interface ChangeListEnvelope {
+  ok: true;
+  data: Array<ChangeEntry>;
+}
+
 export interface ChangePreview {
   preview_id: string;
   path: string;
   kind: string;
-  op: "create" | "modify";
+  op: "create" | "modify" | "delete";
   impact: "normal" | "high";
   confirm_phrase?: string | null;
   base_sha256?: string | null;
-  proposed_sha256: string;
+  proposed_sha256?: string | null;
   diff: Diff;
   warnings?: Array<Issue>;
   errors?: Array<Issue>;

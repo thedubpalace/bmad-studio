@@ -30,7 +30,7 @@ from bmad_studio.core.credentials import CredentialStore
 from bmad_studio.core.errors import StartupError, StudioError
 from bmad_studio.core.path_guard import PathGuard
 from bmad_studio.core.paths import VedaPaths
-from bmad_studio.core.writes import TextKind, WritePipeline
+from bmad_studio.core.writes import RevertKind, TextKind, WritePipeline
 from bmad_studio.core.settings import DEFAULT_HOST, Settings, check_host, check_startup, get_settings
 
 EXIT_STARTUP = 2
@@ -86,11 +86,11 @@ def _install_body_limit(app: FastAPI) -> None:
 
 
 def _build_pipeline(settings: Settings) -> WritePipeline:
-    kinds = {}
+    state = RuntimeState(settings.runtime_dir)
+    kinds: dict = {"revert": RevertKind(state)}
     if settings.enable_text_kind:
         kinds["text"] = TextKind()
-    return WritePipeline(PathGuard(Path(settings.veda_root or ".")), RuntimeState(settings.runtime_dir),
-                         settings.session_secret_value(), kinds)
+    return WritePipeline(PathGuard(Path(settings.veda_root or ".")), state, settings.session_secret_value(), kinds)
 
 
 def create_app(settings: Settings | None = None, *, check: bool = True) -> FastAPI:

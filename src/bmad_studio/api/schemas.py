@@ -105,11 +105,11 @@ class ChangePreview(BaseModel):
     preview_id: str
     path: str
     kind: str
-    op: Literal["create", "modify"]
+    op: Literal["create", "modify", "delete"]
     impact: Literal["normal", "high"]
     confirm_phrase: str | None = None
     base_sha256: str | None = None
-    proposed_sha256: str
+    proposed_sha256: str | None = None  # None = ย้ายไฟล์ไป backup
     diff: Diff
     warnings: list[Issue] = []
     errors: list[Issue] = []
@@ -125,8 +125,8 @@ class ChangePreviewEnvelope(BaseModel):
 class ChangeCommit(BaseModel):
     change_id: str
     path: str
-    op: Literal["create", "modify"]
-    sha256: str
+    op: Literal["create", "modify", "delete"]
+    sha256: str | None = None
     backup: str
     at: str
     replayed: bool
@@ -140,6 +140,41 @@ class ChangeCommitEnvelope(BaseModel):
 ERRORS: dict[int | str, dict[str, Any]] = {
     status: {"model": ErrorEnvelope} for status in (401, 403, 422, 429, 503)
 }
+
+
+class ChangeEntry(BaseModel):
+    change_id: str
+    at: str
+    path: str
+    kind: str
+    op: Literal["create", "modify", "delete"]
+    added: int
+    removed: int
+    impact: Literal["normal", "high"] = "normal"
+    reverts: str | None = None
+    new_sha256: str | None = None
+    current_sha256: str | None = None
+    changed_since: bool
+
+
+class ChangeListEnvelope(BaseModel):
+    ok: Literal[True]
+    data: list[ChangeEntry]
+
+
+class ChangeDiff(BaseModel):
+    change_id: str
+    path: str
+    op: Literal["create", "modify", "delete"]
+    kind: str
+    at: str
+    diff: Diff
+
+
+class ChangeDiffEnvelope(BaseModel):
+    ok: Literal[True]
+    data: ChangeDiff
+
 
 CHANGE_ERRORS: dict[int | str, dict[str, Any]] = {
     status: {"model": ErrorEnvelope} for status in (400, 401, 403, 409, 411, 413, 422, 429, 500, 503)

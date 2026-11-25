@@ -1065,3 +1065,57 @@ p {
   }
 
 }
+
+/* ---------- Change log (design.md ChangeLog & RevertPanel) ---------- */
+.change-item {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s-3) var(--s-6);
+}
+
+.change-item__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-width: 0;
+  flex: 1 1 20rem;
+}
+
+.change-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+  color: var(--text-2);
+  font-size: var(--fs-14);
+}
+
+.change-item__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+
+.change-item__revert {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.confirm-summary__warn {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--warn);
+}
+
+@media (max-width: 639px) {
+  .change-item__actions,
+  .change-item__actions .button,
+  .change-item__revert {
+    width: 100%;
+  }
+}

@@ -18,7 +18,7 @@ from bmad_studio.core.settings import Settings
 from .test_access_policy import _walk
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "bmad_studio"
-FS_WRITERS = {name for name in dir(fs) if name.startswith("write") and callable(getattr(fs, name))}
+FS_WRITERS = {name for name in dir(fs) if name.startswith(("write", "remove")) and callable(getattr(fs, name))}
 ALLOWED = {SRC / "core" / "writes.py", SRC / "adapters" / "fs.py"}
 
 
@@ -37,7 +37,7 @@ def _references_fs_writer(source: str) -> list[int]:
 
 
 def test_fs_has_a_writer_to_guard() -> None:
-    assert "write_bytes_atomic" in FS_WRITERS
+    assert {"write_bytes_atomic", "remove_file"} <= FS_WRITERS
 
 
 def test_no_route_handler_module_uses_fs_writers(settings: Settings) -> None:

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router";
 
 import { useSession } from "./auth/SessionContext";
 import { ChangeReview } from "./changes/ChangeReview";
+import { ChangeDetail, ChangesPage } from "./changes/ChangesPage";
 import { AppShell } from "./components/AppShell";
 import { EmptyState } from "./components/EmptyState";
 import { SessionExpiredModal } from "./components/SessionDialogs";
@@ -76,7 +77,22 @@ export function App() {
             </AppShell>
           }
         />
-        <Route path="/changes" element={<Section title={th.nav.changes} empty={th.empty.changes} />} />
+        <Route
+          path="/changes/:changeId"
+          element={
+            <AppShell title={th.nav.changes}>
+              <ChangeDetail />
+            </AppShell>
+          }
+        />
+        <Route
+          path="/changes"
+          element={
+            <AppShell title={th.nav.changes}>
+              <ChangesPage />
+            </AppShell>
+          }
+        />
         <Route path="*" element={<Section title={th.empty.notFound.title} empty={th.empty.notFound} />} />
       </Routes>
       <SessionExpiredModal />

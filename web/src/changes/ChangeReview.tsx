@@ -51,7 +51,7 @@ function Summary({ preview }: { preview: ChangePreview }) {
       <p className="review-summary__label">{th.review.fileLabel}</p>
       <p className="mono path">{preview.path}</p>
       <ul className="review-summary__meta">
-        <li>{preview.op === "create" ? th.review.opCreate : th.review.opModify}</li>
+        <li>{preview.op === "create" ? th.review.opCreate : preview.op === "delete" ? th.review.opDelete : th.review.opModify}</li>
         <li className="mono">{th.review.lineStats(preview.diff.added, preview.diff.removed)}</li>
         <li className={high ? "tag tag--warn" : "tag"}>
           <Icon name={high ? "alert" : "check"} size={16} />
@@ -160,7 +160,7 @@ function ReviewStep({ pending, onNext }: { pending: PendingChange; onNext: () =>
   );
 }
 
-function HoldButton({ enabled, busy, onConfirm, describedBy }: { enabled: boolean; busy: boolean; onConfirm: () => void; describedBy?: string }) {
+function HoldButton({ enabled, busy, onConfirm, describedBy, label }: { enabled: boolean; busy: boolean; onConfirm: () => void; describedBy?: string; label: string }) {
   const [progress, setProgress] = useState(0);
   const timer = useRef<number | null>(null);
   const start = useRef(0);
@@ -214,7 +214,7 @@ function HoldButton({ enabled, busy, onConfirm, describedBy }: { enabled: boolea
       }}
     >
       <span className="hold-button__ring" aria-hidden="true" />
-      {busy ? th.review.writing : th.review.write}
+      {busy ? th.review.writing : label}
     </button>
   );
 }
@@ -230,6 +230,8 @@ function ConfirmStep({ pending, onBack }: { pending: PendingChange; onBack: () =
   const busy = pending.outcome.kind === "writing";
   const missingPhrase = high && phrase === null;
   const typedOk = phrase !== null && typed.trim() === phrase;
+  // ข้อความปุ่มตรงกับการกระทำ (design.md): เขียนไฟล์ / คืนค่าไฟล์
+  const label = pending.request.kind === "revert" ? th.review.writeRevert : th.review.write;
   // กดค้างเป็นทางเลือกที่ design.md อนุญาตแทนการพิมพ์ — ส่งชื่อที่ server กำหนดให้ server ตรวจ
   const submit = () => {
     if (missingPhrase) return;
@@ -241,7 +243,12 @@ function ConfirmStep({ pending, onBack }: { pending: PendingChange; onBack: () =
       <ul className="confirm-summary">
         <li className="mono path">{preview.path}</li>
         <li className="mono">{th.review.lineStats(preview.diff.added, preview.diff.removed)}</li>
-        <li>{th.review.willBackup}</li>
+        <li>{preview.op === "delete" ? th.review.willMoveToBackup : th.review.willBackup}</li>
+        {(preview.warnings ?? []).map((w, i) => (
+          <li key={`${w.code}-${i}`} className="confirm-summary__warn">
+            <Icon name="alert" size={16} /> {w.error}
+          </li>
+        ))}
       </ul>
       {missingPhrase ? (
         <p className="form-error" role="alert">
@@ -273,7 +280,7 @@ function ConfirmStep({ pending, onBack }: { pending: PendingChange; onBack: () =
         </button>
         <div className="review-actions__primary">
           {high && !reduced && !missingPhrase ? (
-            <HoldButton enabled={typedOk} busy={busy} onConfirm={submit} describedBy={typedOk ? undefined : reasonId} />
+            <HoldButton enabled={typedOk} busy={busy} onConfirm={submit} describedBy={typedOk ? undefined : reasonId} label={label} />
           ) : (
             <button
               type="button"
@@ -284,7 +291,7 @@ function ConfirmStep({ pending, onBack }: { pending: PendingChange; onBack: () =
                 if (!busy && (!high || typedOk)) submit();
               }}
             >
-              {busy ? th.review.writing : th.review.write}
+              {busy ? th.review.writing : label}
             </button>
           )}
           {high && !typedOk && !missingPhrase ? (

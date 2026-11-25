@@ -32,6 +32,7 @@ from bmad_studio.core.errors import StudioError
 from bmad_studio.core.path_guard import GuardedPath, PathGuard
 
 TOKEN_TTL_SECONDS = 10 * 60
+HISTORY_LIMIT = 500
 MAX_PREVIEWS = 200  # preview ที่ยังไม่หมดอายุทั้งระบบ (ผู้ใช้เดียว); เกิน = 429 ไม่ไล่ของเดิมทิ้ง
 HIGH_IMPACT_RULES = frozenset({"agent", "agent-backup", "claude-md", "flow-default", "flow-project"})
 _TOKEN_CONTEXT = b"bmad-studio confirm-token v1"
@@ -51,14 +52,19 @@ class ChangeRequest:
 
 @dataclass
 class Proposal:
-    proposed: bytes
+    """``proposed`` = bytes ใหม่ทั้งไฟล์ หรือ ``None`` = ย้ายไฟล์ไป backup (ลบออกจากที่เดิม)."""
+
+    proposed: bytes | None
     warnings: list[dict[str, str]] = field(default_factory=list)
     errors: list[dict[str, str]] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)  # ต่อท้าย changelog (เช่น ``reverts``)
 
 
 class KindHandler(Protocol):
     name: str
     rules: frozenset[str]
+    #: ตรวจ EOL/whitespace ทั้งไฟล์ (AD-6) — revert คืน bytes ตรง ๆ จึงปิด
+    check_whitespace: bool
 
     def propose(self, target: GuardedPath, current: fs.TextDoc, payload: Mapping[str, Any]) -> Proposal: ...
 
@@ -72,6 +78,7 @@ class TextKind:
 
     name = "text"
     rules = frozenset({"agent", "bmad-custom"})
+    check_whitespace = True
 
     def propose(self, target: GuardedPath, current: fs.TextDoc, payload: Mapping[str, Any]) -> Proposal:
         text = payload.get("text")
@@ -80,6 +87,57 @@ class TextKind:
         if len(text) > fs.MAX_BYTES or len(text.encode("utf-8", "surrogatepass")) > fs.MAX_BYTES:
             raise StudioError("file_too_large", "ไฟล์ใหญ่เกินกว่าที่สตูดิโอแก้ได้", 413)
         return Proposal(current.encode(text))
+
+
+class RevertKind:
+    """คืนไฟล์เป็น bytes ใน backup ของรายการ ``payload.change_id`` (REQ-043 b, AD-6).
+
+    - เดิมมีไฟล์: proposed = ``original.bin`` ตรง ๆ (ไม่ผ่าน text) → byte-for-byte
+    - เดิมไม่มีไฟล์ (รายการนั้นสร้างไฟล์): ย้ายไฟล์ปัจจุบันไป backup ของรายการใหม่
+    - ไฟล์ถูกแก้ต่อหลังรายการนั้น: ``warnings[]`` (ยังคืนค่าได้)
+    impact เท่ากับไฟล์เป้าหมาย (AD-5). validator ของ flow/CLAUDE.md (epic 3/5) ต้องตรวจ revert ด้วย.
+    """
+
+    name = "revert"
+    rules = frozenset({"agent", "agent-backup", "claude-md", "bmad-custom", "flow-default", "flow-project"})
+    check_whitespace = False
+
+    def __init__(self, state: RuntimeState) -> None:
+        self.state = state
+
+    def propose(self, target: GuardedPath, current: fs.TextDoc, payload: Mapping[str, Any]) -> Proposal:
+        change_id = payload.get("change_id")
+        if not valid_id(change_id):
+            raise StudioError("invalid_request", "ต้องส่ง payload.change_id ที่ถูกต้อง", 422)
+        entry = next((item for item in self.state.read_changes() if item.get("change_id") == change_id), None)
+        if entry is None:
+            raise StudioError("change_not_found", "ไม่พบรายการนี้ในประวัติ", 404)
+        if entry.get("path") != target.rel:
+            raise StudioError("revert_target_mismatch", "รายการนี้ไม่ใช่ของไฟล์ที่ระบุ", 422)
+        backup = self.state.read_backup(change_id)
+        if backup is None:
+            raise StudioError("backup_missing", "ไม่พบไฟล์สำรองของรายการนี้", 410)
+        meta, original = backup
+        existed = bool(meta.get("existed"))
+        if meta.get("path") != target.rel or (existed and original is None):
+            raise StudioError("backup_missing", "ไม่พบไฟล์สำรองของรายการนี้", 410)
+        if existed and _sha(original) != meta.get("sha256"):
+            raise StudioError("backup_corrupt", "ไฟล์สำรองเสียหาย คืนค่าไม่ได้", 422)
+        # backup ต้องตรงกับ changelog (ทั้งมี/ไม่มีไฟล์เดิม และ hash ของฉบับเดิม) — กันการสลับโฟลเดอร์สำรอง
+        if existed != (entry.get("base_sha256") is not None) or _sha(original) != entry.get("base_sha256"):
+            raise StudioError("backup_corrupt", "ไฟล์สำรองไม่ตรงกับประวัติ คืนค่าไม่ได้", 422)
+        warnings: list[dict[str, str]] = []
+        if current.sha256 != entry.get("new_sha256"):
+            warnings.append({"code": "changed_since", "error": "ไฟล์ถูกแก้ต่อหลังรายการนี้ — การคืนค่าจะทับการแก้เหล่านั้นด้วย"})
+        errors: list[dict[str, str]] = []
+        extra = {"reverts": change_id}
+        if not existed:
+            if not current.exists:
+                errors.append({"code": "no_change", "error": "ไฟล์นี้ไม่มีอยู่แล้ว ไม่มีอะไรต้องคืนค่า"})
+            return Proposal(None, warnings, errors, extra)
+        if current.exists and current.raw == original:
+            errors.append({"code": "no_change", "error": "ไฟล์ตรงกับฉบับสำรองอยู่แล้ว"})
+        return Proposal(original, warnings, errors, extra)
 
 
 def impact_for(rule: str) -> str:
@@ -92,6 +150,10 @@ def confirm_phrase(guarded: GuardedPath) -> str:
     if guarded.rule == "agent" and name.lower().endswith(".md"):
         return name[:-3]
     return name
+
+
+def _count(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
 def _sha(data: bytes | None) -> str | None:
@@ -137,9 +199,9 @@ class WritePipeline:
     # -- token ---------------------------------------------------------------
     def _sign(self, meta: Mapping[str, Any], session_fp: str, expiry: int) -> str:
         """ลายเซ็นผูกทุกอย่างที่ commit ใช้ตัดสิน — แก้ไฟล์ preview บนดิสก์แล้ว token ใช้ไม่ได้."""
-        issues = json.dumps([meta["errors"], meta["warnings"]], sort_keys=True, ensure_ascii=True)
+        issues = json.dumps([meta["errors"], meta["warnings"], meta.get("extra", {})], sort_keys=True, ensure_ascii=True)
         message = "|".join([
-            meta["preview_id"], meta["rel"], meta["base_sha256"] or "-", meta["proposed_sha256"], session_fp,
+            meta["preview_id"], meta["rel"], meta["base_sha256"] or "-", meta["proposed_sha256"] or "-", session_fp,
             str(expiry), meta["kind"], meta["op"], meta["impact"], meta["confirm_phrase"],
             hashlib.sha256(issues.encode()).hexdigest(),
         ])
@@ -184,13 +246,22 @@ class WritePipeline:
             raise StudioError("conflict", "ไฟล์ถูกแก้จากภายนอกระหว่างที่คุณแก้ โหลดใหม่ก่อน", 409,
                               {"current_sha256": current.sha256})
         proposal = handler.propose(guarded, current, request.payload)
-        if len(proposal.proposed) > self.max_bytes:
+        delete = proposal.proposed is None
+        if not delete and len(proposal.proposed) > self.max_bytes:
             raise StudioError("file_too_large", "ไฟล์ใหญ่เกินกว่าที่สตูดิโอแก้ได้", 413)
-        errors = [*proposal.errors, *_whitespace_errors(current, proposal.proposed)]
+        errors = list(proposal.errors)
+        if delete and not current.exists and not errors:
+            errors.append({"code": "no_change", "error": "ไม่มีไฟล์ให้ย้าย"})
+        if not delete and not os.path.isdir(os.path.dirname(os.fspath(guarded.path))):
+            errors.append({"code": "parent_missing", "error": "ไม่มีโฟลเดอร์ปลายทาง"})
+        if not delete and getattr(handler, "check_whitespace", True):
+            errors.extend(_whitespace_errors(current, proposal.proposed))
         try:
-            diff = unified(current.text, fs.decode(proposal.proposed).text)
-        except StudioError:  # ผลลัพธ์ไม่ใช่ข้อความ — มี error แล้ว ไม่แสดง diff ที่ทำให้เข้าใจผิด
+            diff = unified(current.text, "" if delete else fs.decode(proposal.proposed).text)
+        except StudioError:  # ผลลัพธ์ไม่ใช่ข้อความ — ไม่แสดง diff ที่ทำให้เข้าใจผิด
             diff = {"hunks": [], "added": 0, "removed": 0, "old_eof_newline": True, "new_eof_newline": True}
+            if not errors:
+                errors.append({"code": "unsupported_encoding", "error": "ผลลัพธ์ไม่ใช่ข้อความ UTF-8"})
         now = self.clock()
         self.state.sweep_previews(TOKEN_TTL_SECONDS * 2, now)
         if self.state.count_previews() >= MAX_PREVIEWS:
@@ -199,13 +270,14 @@ class WritePipeline:
         expiry = int(now) + TOKEN_TTL_SECONDS
         meta: dict[str, Any] = {
             "preview_id": preview_id, "kind": request.kind, "rel": guarded.rel, "rule": guarded.rule,
-            "op": "modify" if current.exists else "create",
+            "op": "delete" if delete else "modify" if current.exists else "create",
             "base_sha256": current.sha256, "proposed_sha256": _sha(proposal.proposed),
+            "extra": proposal.extra,
             "impact": impact_for(guarded.rule), "confirm_phrase": confirm_phrase(guarded),
             "errors": errors, "warnings": proposal.warnings, "added": diff["added"], "removed": diff["removed"],
             "expiry": expiry, "actor": actor, "created_at": utc_iso(now),
         }
-        self.state.save_preview(preview_id, meta, proposal.proposed)
+        self.state.save_preview(preview_id, meta, b"" if delete else proposal.proposed)
         return {
             "preview_id": preview_id, "path": guarded.rel, "kind": request.kind, "op": meta["op"],
             "impact": meta["impact"], "confirm_phrase": meta["confirm_phrase"] if meta["impact"] == "high" else None,
@@ -234,7 +306,11 @@ class WritePipeline:
         if meta.get("impact") == "high":
             if not isinstance(typed_confirmation, str) or typed_confirmation.strip() != meta.get("confirm_phrase"):
                 raise StudioError("confirmation_required", "พิมพ์ชื่อไฟล์/agent ให้ตรงเพื่อยืนยัน", 400)
-        if _sha(proposed) != meta.get("proposed_sha256"):
+        delete = meta.get("op") == "delete"
+        if delete:
+            if proposed != b"" or meta.get("proposed_sha256") is not None:
+                raise invalid
+        elif _sha(proposed) != meta.get("proposed_sha256"):
             raise invalid  # ไฟล์ preview บนดิสก์ถูกแก้ — ไม่เขียนสิ่งที่ผู้ใช้ไม่ได้เห็น
 
         guarded = self.guard.check_writable(meta["rel"])
@@ -257,6 +333,7 @@ class WritePipeline:
                 "base_sha256": meta["base_sha256"], "new_sha256": meta["proposed_sha256"],
                 "added": meta.get("added", 0), "removed": meta.get("removed", 0),
                 "backup": f".runtime/backups/{change_id}",
+                **{key: value for key, value in (meta.get("extra") or {}).items() if key == "reverts"},
             }
             if audit is not None:
                 try:
@@ -275,14 +352,17 @@ class WritePipeline:
             try:
                 self.state.write_backup(change_id, original, {
                     "change_id": change_id, "path": meta["rel"], "existed": original is not None,
-                    "sha256": _sha(original), "at": record["at"],
-                })
+                    "sha256": _sha(original), "new_sha256": meta["proposed_sha256"], "at": record["at"],
+                }, new=None if delete else proposed)
             except OSError:
                 outcome("failed", step="backup")
                 raise StudioError("write_failed", "สำรองไฟล์เดิมไม่ได้ ไม่มีอะไรถูกเปลี่ยน", 503,
                                   {"step": "backup"}) from None
             try:
-                fs.write_bytes_atomic(guarded.path, proposed)
+                if delete:
+                    fs.remove_file(guarded.path)  # ฉบับเดิมอยู่ใน backup ของรายการนี้แล้ว
+                else:
+                    fs.write_bytes_atomic(guarded.path, proposed)
             except OSError:
                 outcome("failed", step="write")
                 raise StudioError("write_failed", "เขียนไฟล์ไม่ได้ ไม่มีอะไรถูกเปลี่ยน", 503, {"step": "write"}) from None
@@ -309,9 +389,64 @@ class WritePipeline:
     def _restore(self, guarded: GuardedPath, original: bytes | None) -> bool:
         try:
             if original is None:
-                os.unlink(guarded.path)
+                fs.remove_file(guarded.path)
             else:
                 fs.write_bytes_atomic(guarded.path, original)
         except OSError:
             return False
         return True
+
+    # -- history (read-only) -------------------------------------------------
+    def history(self, limit: int = HISTORY_LIMIT) -> list[dict[str, Any]]:
+        """รายการใน changelog ล่าสุดก่อน (ไม่เกิน ``limit``) พร้อม sha ปัจจุบันของไฟล์ (base ของ revert)."""
+        limit = max(1, min(int(limit), HISTORY_LIMIT))
+        entries = list(reversed(self.state.read_changes()))[:limit]
+        current: dict[str, str | None] = {}
+        out: list[dict[str, Any]] = []
+        for entry in entries:
+            rel = entry.get("path")
+            if not isinstance(rel, str) or not valid_id(entry.get("change_id")):
+                continue
+            if rel not in current:
+                try:
+                    guarded = self.guard.check_writable(rel)
+                    current[rel] = _sha(fs.read_bytes(guarded.path, self.max_bytes))
+                except (StudioError, OSError):
+                    current[rel] = None
+            out.append({
+                "change_id": entry["change_id"], "at": entry.get("at", ""), "path": rel,
+                "kind": str(entry.get("kind", "")),
+                "op": entry.get("op") if entry.get("op") in {"create", "modify", "delete"} else "modify",
+                "added": _count(entry.get("added")), "removed": _count(entry.get("removed")),
+                "reverts": entry.get("reverts") if valid_id(entry.get("reverts")) else None,
+                "impact": "high" if entry.get("impact") == "high" else "normal",
+                "new_sha256": entry.get("new_sha256"), "current_sha256": current[rel],
+                "changed_since": current[rel] != entry.get("new_sha256"),
+            })
+        return out
+
+    def change_diff(self, change_id: str) -> dict[str, Any]:
+        """diff ของรายการหนึ่ง (ฉบับก่อน → ฉบับที่เขียน) จาก backup สำหรับโหมดอ่าน."""
+        if not valid_id(change_id):
+            raise StudioError("change_not_found", "ไม่พบรายการนี้ในประวัติ", 404)
+        entry = next((e for e in self.state.read_changes() if e.get("change_id") == change_id), None)
+        backup = self.state.read_backup(change_id)
+        if entry is None or backup is None:
+            raise StudioError("change_not_found", "ไม่พบรายการนี้ในประวัติ", 404)
+        meta, original = backup
+        new = self.state.read_backup_new(change_id)
+        op = entry.get("op", "modify")
+        missing = StudioError("diff_unavailable", "ไม่มีข้อมูลพอสำหรับแสดง diff ของรายการนี้", 410)
+        if meta.get("path") != entry.get("path"):
+            raise missing
+        if bool(meta.get("existed")) and (original is None or _sha(original) != meta.get("sha256")):
+            raise missing
+        if op != "delete" and (new is None or _sha(new) != entry.get("new_sha256")):
+            raise missing  # รายการก่อน story 2-4 ไม่มี new.bin — ไม่แสดงเป็น "ลบทั้งไฟล์" ให้เข้าใจผิด
+        try:
+            old_text = fs.decode(original).text if original is not None else ""
+            new_text = fs.decode(new).text if new is not None else ""
+        except StudioError:
+            raise StudioError("unsupported_encoding", "แสดง diff ของรายการนี้ไม่ได้", 422) from None
+        return {"change_id": change_id, "path": entry.get("path"), "op": entry.get("op", "modify"),
+                "kind": entry.get("kind", ""), "at": entry.get("at", ""), "diff": unified(old_text, new_text)}

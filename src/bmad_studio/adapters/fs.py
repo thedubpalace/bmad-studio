@@ -186,3 +186,8 @@ def write_bytes_atomic(path: Path | str, data: bytes) -> None:
         except OSError:
             pass
         raise
+
+
+def remove_file(path: Path | str) -> None:
+    """ลบไฟล์ (ฉบับเดิมต้องอยู่ใน backup แล้ว) — เรียกได้จาก :mod:`bmad_studio.core.writes` เท่านั้น."""
+    os.unlink(os.fspath(path))

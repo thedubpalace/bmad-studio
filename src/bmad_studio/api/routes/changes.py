@@ -8,13 +8,19 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from bmad_studio.api import auth
 from bmad_studio.api.envelope import ok
-from bmad_studio.api.schemas import CHANGE_ERRORS, ChangeCommitEnvelope, ChangePreviewEnvelope
+from bmad_studio.api.schemas import (
+    CHANGE_ERRORS,
+    ChangeCommitEnvelope,
+    ChangeDiffEnvelope,
+    ChangeListEnvelope,
+    ChangePreviewEnvelope,
+)
 from bmad_studio.core.errors import StudioError
 from bmad_studio.core.writes import ChangeRequest
 
@@ -46,6 +52,18 @@ def _pipeline(request: Request):
     if pipeline is None:
         raise StudioError("write_unavailable", "ระบบเขียนไฟล์ไม่พร้อม", 503)
     return pipeline
+
+
+@router.get("/api/changes", response_model=ChangeListEnvelope, responses=CHANGE_ERRORS)
+def history(request: Request, limit: int = Query(default=200, ge=1, le=500)) -> JSONResponse:
+    """ประวัติการเขียนของแอป ล่าสุดก่อน (REQ-043, story 2-4)."""
+    return ok(_pipeline(request).history(limit))
+
+
+@router.get("/api/changes/{change_id}", response_model=ChangeDiffEnvelope, responses=CHANGE_ERRORS)
+def change_diff(change_id: str, request: Request) -> JSONResponse:
+    """diff ของรายการหนึ่งแบบอ่านอย่างเดียว."""
+    return ok(_pipeline(request).change_diff(change_id))
 
 
 @router.post("/api/changes/preview", response_model=ChangePreviewEnvelope, responses=CHANGE_ERRORS)

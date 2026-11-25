@@ -18,6 +18,16 @@ from pathlib import Path
 from typing import Any
 
 _ID = re.compile(r"[0-9a-f]{32}")
+MAX_BACKUP_BYTES = 4 * 1024 * 1024  # ใหญ่กว่า fs.MAX_BYTES — ไฟล์ใหญ่กว่านี้ใน backups ถือว่าเสียหาย
+
+
+def _read_capped(path: Path) -> bytes | None:
+    try:
+        if path.stat().st_size > MAX_BACKUP_BYTES:
+            return None
+        return path.read_bytes()
+    except (OSError, ValueError):
+        return None
 
 
 def valid_id(value: object) -> bool:
@@ -122,12 +132,16 @@ class RuntimeState:
             raise ValueError("invalid change id")
         return self.backups / change_id
 
-    def write_backup(self, change_id: str, original: bytes | None, meta: dict[str, Any]) -> Path:
+    def write_backup(self, change_id: str, original: bytes | None, meta: dict[str, Any],
+                     new: bytes | None = None) -> Path:
+        """``original.bin`` = ฉบับก่อนเขียน (ใช้ revert), ``new.bin`` = ฉบับที่เขียน (ใช้ดู diff ย้อนหลัง)."""
         directory = self.backup_dir(change_id)
         directory.mkdir(parents=True, exist_ok=False)
         try:
             if original is not None:
                 _atomic(directory / "original.bin", original)
+            if new is not None:
+                _atomic(directory / "new.bin", new)
             _atomic(directory / "meta.json", _json(meta))
         except BaseException:
             for child in directory.iterdir():
@@ -149,13 +163,18 @@ class RuntimeState:
         except (OSError, ValueError):
             return None
         original_path = directory / "original.bin"
-        try:
-            original = original_path.read_bytes() if original_path.is_file() else None
-        except OSError:
+        original = _read_capped(original_path) if original_path.is_file() else None
+        if original_path.is_file() and original is None:
             return None
         if not isinstance(meta, dict):
             return None
         return meta, original
+
+    def read_backup_new(self, change_id: str) -> bytes | None:
+        try:
+            return _read_capped(self.backup_dir(change_id) / "new.bin")
+        except ValueError:
+            return None
 
     def append_change(self, record: dict[str, Any]) -> None:
         line = _json(record) + b"\n"
