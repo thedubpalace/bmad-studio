@@ -16,7 +16,6 @@ from pydantic import ValidationError
 from bmad_studio.core.flow import policy
 from bmad_studio.core.flow.loader import FlowYamlError, load_yaml
 from bmad_studio.core.flow.schema import Flow, Stage, Track
-from bmad_studio.core.path_guard import FLOW_DEFAULT_RULE, FLOW_PROJECT_RULE
 from bmad_studio.core.paths import VedaPaths
 
 DEFAULT_TEMPLATE = Path(__file__).resolve().parents[2] / "defaults" / "flow.default.yaml"
@@ -240,18 +239,3 @@ def load_packaged_default() -> Flow:
         raise RuntimeError(f"packaged default flow ผิดกฎ: {issues}")
     return flow
 
-
-def file_validators(paths: VedaPaths) -> dict[str, FileValidator]:
-    """validator ต่อ rule ของ path guard สำหรับ write pipeline (เช่น revert): bytes → issues.
-
-    ``flow-project`` (overlay) ต้อง merge กับ default ก่อนตรวจ AD-8 — จนกว่าจะมี merge
-    (story 3-2) ปฏิเสธไว้ก่อน (fail closed) แทนการผ่านโดยไม่ตรวจ.
-    """
-
-    def flow_default(raw: bytes) -> list[dict[str, str]]:
-        return validate_flow_bytes(raw, Catalog.scan(paths))[1]
-
-    def flow_project(_raw: bytes) -> list[dict[str, str]]:
-        return [issue("flow_overlay_unchecked", "ยังตรวจ flow ต่อโปรเจกต์ไม่ได้ จึงคืนค่าไม่ได้")]
-
-    return {FLOW_DEFAULT_RULE: flow_default, FLOW_PROJECT_RULE: flow_project}

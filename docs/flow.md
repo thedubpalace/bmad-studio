@@ -1,7 +1,7 @@
 # flow.yaml — flow ต่อโปรเจกต์ของ Veda
 
 flow บอกว่าโปรเจกต์หนึ่งเดินผ่านขั้นใดบ้าง ใช้ agent/skill อะไร มี gate ตรงไหน และขั้นไหนถูกข้ามด้วยเหตุผลใด
-orchestrator อ่านผ่าน `bmad-studio flow resolve <project>` (อ่านอย่างเดียว) — กฎทั้งหมดคำนวณใน `bmad_studio.core.flow` (AD-1)
+orchestrator อ่านผ่าน `flow resolve <project>` (ดู [Resolver](#resolver-req-048); อ่านอย่างเดียว) — กฎทั้งหมดคำนวณใน `bmad_studio.core.flow` (AD-1)
 
 - JSON Schema: [`docs/flow-schema.json`](flow-schema.json) (สร้างด้วย `uv run python -m bmad_studio.cli flow schema --out docs/flow-schema.json`)
 - default ที่มากับแพ็กเกจ: `src/bmad_studio/defaults/flow.default.yaml`
@@ -58,11 +58,51 @@ YAML ที่รับ: document เดียว, ไม่มี directive (`%
 | `plan_gate_missing` | ขั้น developer ใน full ไม่มีขั้นที่ enabled และ produces `planReady` มาก่อน |
 | `locked_gate_violation` | ละเมิด human gate ที่ล็อก (ด้านล่าง) |
 | `validator_missing` | write pipeline ไม่มี validator ของไฟล์ flow — ปฏิเสธไว้ก่อน (fail closed) |
-| `flow_overlay_unchecked` | (story 3-1 เท่านั้น) ยังตรวจ overlay ไม่ได้จนกว่าจะมี merge — ปฏิเสธการคืนค่า |
+| `unknown_stage`, `unknown_track` | overlay แก้ขั้น/track ที่ไม่มีใน default (ขั้นใหม่ใช้ `add`) |
+| `cannot_remove_stage` | `to_overlay` ได้ effective ที่ไม่มีขั้นของ default — ใช้ `enabled: false` แทนการลบ |
+| `cannot_remove_track` | `to_overlay` ได้ effective ที่ไม่มี track ของ default |
+| `flow_unreadable` | อ่านไฟล์ flow ไม่ได้ (ไม่ใช่ไฟล์/ไม่มีสิทธิ์) |
+| `default_invalid` | ตรวจ overlay ไม่ได้เพราะ `.veda/flow.default.yaml` ผิดกฎ (ไม่ fallback ไป default ของแพ็กเกจ) |
 
 `yaml_invalid` มี `reason` บอกสาเหตุละเอียด: `yaml_alias`, `yaml_anchor`, `yaml_tag`, `yaml_directive`, `yaml_merge_key`,
 `yaml_multi_document`, `yaml_complex_key`, `yaml_duplicate_key`, `yaml_too_large`, `yaml_too_deep`, `yaml_invalid`;
 `schema_invalid` แสดงไม่เกิน 50 จุดแล้วสรุปจำนวนที่เหลือ
+
+## Resolver (REQ-048)
+
+```
+uv run --project C:/Users/thedu/code/bmad-studio python -m bmad_studio.cli flow resolve <project> [--track full|quick] [--json]
+uv run --project C:/Users/thedu/code/bmad-studio python -m bmad_studio.cli flow validate [<project>] [--file PATH]
+```
+
+(entry point `bmad-studio` ใช้ได้เหมือนกันบนเครื่องที่ไม่บล็อก `.venv/Scripts/*.exe`; บนเครื่องนี้ Windows Application Control
+บล็อก exe จึงใช้ `python -m bmad_studio.cli`.) ไม่ต้องรัน server, ไม่เขียนไฟล์ใด, อ่าน registry/state แบบอ่านอย่างเดียว
+
+- exit `0` = สำเร็จ (`--json`: `{ok: true, next, stages, locked, entry, complete, hints, warnings, flow, registry}`)
+- exit `2` = flow ผิด (`flow_invalid` + `issues` + `source`), `project_not_found`, `registry_unreadable`, `veda_root_missing`,
+  `unknown_track`, `read_failed`, `invalid_arguments` — ไม่เดาผล
+- `warnings`: `sprint_status_unreadable`, `story_status_unknown`, `quick_status_unknown`, `condition_unknown`
+  (registry ไม่มี field ของ condition — ขั้นนั้น**ไม่ถูกข้าม**จนกว่าจะตั้งค่า)
+- `next`: `{stage, agent, skill, gate, optional, status, note}` หรือ `null` (flow จบ / เข้า track ไม่ได้ตาม `entry`)
+
+สถานะต่อขั้น (`done`/`active`/`pending`/`skipped` + `skipReason`):
+
+| ขั้น | เสร็จเมื่อ |
+| --- | --- |
+| ปิด (`enabled: false`) หรือ `condition` เป็น false | `skipped` พร้อมเหตุผล (registry ไม่มีค่า = ไม่ข้าม + คำเตือน `condition_unknown`) |
+| `requirements-review` | `requirementsReady === true` ใน registry เท่านั้น; ขั้นก่อนหน้าเสร็จ = `active` (รอคนที่ `/review`) |
+| ขั้นที่มี `produces` | ทุก flag ใน registry เป็น `true` |
+| project-bootstrapper | มีใน registry |
+| ba | มี `requirements.md` |
+| developer | ทุก story ใน `sprint-status.yaml` เป็น review/done — สถานะอื่น (รวมที่ไม่รู้จัก) = ยังไม่เสร็จ (ไม่มี sprint-status: ดู `status` ของ registry) |
+| reviewer (`review`) | ทุก story `done`; มี story `review` = `active` |
+| reviewer (`retrospective`) | ทุก epic `done` และ `epic-N-retrospective: done`; epic ที่จบแล้วแต่ยังไม่มี retro = `active` (แม้ epic อื่นยังพัฒนา); ไม่มี epic หรือโปรเจกต์ที่พัฒนาแล้วโดยไม่มี sprint-status = `skipped` |
+| devops | registry มี `dockerImage`/`containerName` หรือ `status: deployed` |
+| quick: developer / reviewer | `quick/*.md` ที่ status in-progress/ready-for-dev/draft = งาน developer, review/in-review = งาน reviewer |
+
+ขั้นถัดไป = ขั้น `active` ที่ลึกสุดซึ่ง**บรรพบุรุษทุกขั้น**เสร็จ/ข้าม/active (ขั้น developer/reviewer ไม่บล็อกกันเอง; reviewer/retro
+ก่อน developer เมื่อมีหลายงาน) ไม่งั้นขั้น `pending`
+แรกที่ขั้นก่อนหน้าเสร็จ/ข้ามหมด (ขั้น optional เป็นทางเลือกสุดท้าย); ใน `full` ถ้า `requirementsReady` ไม่จริง next จะไม่เลย gate
 
 ## Human gate ที่ล็อก (AD-8, REQ-047)
 

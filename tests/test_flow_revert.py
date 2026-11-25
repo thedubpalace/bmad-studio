@@ -15,7 +15,8 @@ from bmad_studio.adapters import fs
 from bmad_studio.adapters.state import RuntimeState
 from bmad_studio.api.app import create_app
 from bmad_studio.core.errors import StudioError
-from bmad_studio.core.flow.validate import DEFAULT_TEMPLATE, file_validators
+from bmad_studio.core.flow.files import file_validators
+from bmad_studio.core.flow.validate import DEFAULT_TEMPLATE
 from bmad_studio.core.path_guard import GuardedPath, PathGuard
 from bmad_studio.core.paths import VedaPaths
 from bmad_studio.core.settings import Settings
@@ -108,18 +109,41 @@ def test_revert_to_broken_yaml_is_blocked(flow_root: Path, tmp_path: Path) -> No
     assert [e["code"] for e in preview["errors"]] == ["yaml_invalid"]
 
 
-def test_project_overlay_revert_fails_closed_until_merge_exists(flow_root: Path, tmp_path: Path) -> None:
+def _overlay_revert(flow_root: Path, tmp_path: Path, original: bytes) -> tuple[WritePipeline, dict, Path]:
     (flow_root / ".veda" / "projects" / "demo").mkdir()
     target = flow_root / PROJECT_TARGET
-    target.write_bytes(b"extends: default\n")
+    target.write_bytes(original)
     writer = pipeline(flow_root, tmp_path / "rt", {"flow-project": lambda _raw: []})
-    entry = write(writer, PROJECT_TARGET, "extends: default\ntracks: {}\n", fs.sha256_hex(b"extends: default\n"))
+    entry = write(writer, PROJECT_TARGET, "extends: default\n", fs.sha256_hex(original))
     pipe = pipeline(flow_root, tmp_path / "rt", file_validators(VedaPaths(flow_root)))
-    preview = revert(pipe, PROJECT_TARGET, entry["change_id"], target.read_bytes())
-    assert [e["code"] for e in preview["errors"]] == ["flow_overlay_unchecked"]
+    return pipe, revert(pipe, PROJECT_TARGET, entry["change_id"], target.read_bytes()), target
+
+
+def test_project_overlay_revert_to_bypass_is_blocked(flow_root: Path, tmp_path: Path) -> None:
+    """overlay ถูก merge กับ default แล้วตรวจ effective (3-2) — ฉบับสำรองที่ข้าม gate คืนค่าไม่ได้."""
+    bypass = b"extends: default\ntracks:\n  full:\n    stages:\n      develop: {after: [requirements]}\n"
+    pipe, preview, target = _overlay_revert(flow_root, tmp_path, bypass)
+    assert any(e["code"] == "locked_gate_violation" and e.get("stage") == "develop" for e in preview["errors"])
     with pytest.raises(StudioError):
         pipe.commit(preview["preview_id"], preview["confirm_token"], FP, "admin", "flow.yaml")
-    assert target.read_bytes() == b"extends: default\ntracks: {}\n"
+    assert target.read_bytes() == b"extends: default\n"
+
+
+def test_project_overlay_revert_to_valid_overlay_is_allowed(flow_root: Path, tmp_path: Path) -> None:
+    valid = b"extends: default\ntracks:\n  full:\n    stages:\n      ux-design: {enabled: false}\n"
+    pipe, preview, target = _overlay_revert(flow_root, tmp_path, valid)
+    assert preview["errors"] == []
+    pipe.commit(preview["preview_id"], preview["confirm_token"], FP, "admin", "flow.yaml")
+    assert target.read_bytes() == valid
+
+
+def test_project_overlay_validated_against_veda_default(flow_root: Path, tmp_path: Path) -> None:
+    """default ใน veda ผิดกฎ → overlay ใดก็ตรวจไม่ผ่าน (ไม่ fallback ไปใช้ packaged)."""
+    data = default_data()
+    stage(data, "requirements-review")["enabled"] = False
+    (flow_root / ".veda" / "flow.default.yaml").write_text(dump(data), encoding="utf-8")
+    issues = file_validators(VedaPaths(flow_root))["flow-project"](b"extends: default\n")
+    assert issues[0]["code"] == "default_invalid"
 
 
 def test_revert_without_flow_validator_fails_closed(flow_root: Path, tmp_path: Path) -> None:

@@ -29,7 +29,7 @@ from bmad_studio.api.routes import web as web_routes
 from bmad_studio.core.credentials import CredentialStore
 from bmad_studio.core.errors import StartupError, StudioError
 from bmad_studio.core.path_guard import PathGuard
-from bmad_studio.core.flow.validate import file_validators
+from bmad_studio.core.flow.files import file_validators
 from bmad_studio.core.paths import VedaPaths
 from bmad_studio.core.writes import RevertKind, TextKind, WritePipeline
 from bmad_studio.core.settings import DEFAULT_HOST, Settings, check_host, check_startup, get_settings

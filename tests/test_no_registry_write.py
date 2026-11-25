@@ -14,7 +14,12 @@ import ast
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "bmad_studio"
-MAY_NAME_REGISTRY = {SRC / "core" / "path_guard.py"}
+MAY_NAME_REGISTRY = {
+    SRC / "core" / "path_guard.py",
+    # story 3-2: resolver อ่าน registry (อ่านอย่างเดียว: fs.read_bytes) และอ้างชื่อในข้อความ/skipReason
+    SRC / "core" / "flow" / "status.py",
+    SRC / "core" / "flow" / "resolve.py",
+}
 WRITE_CALLS = {
     "open", "write_text", "write_bytes", "write", "replace", "rename", "dump", "touch", "unlink",
     "remove", "copy", "copy2", "copyfile", "move", "rmtree", "mkstemp", "NamedTemporaryFile",
