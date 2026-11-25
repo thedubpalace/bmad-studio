@@ -24,12 +24,14 @@ from bmad_studio.adapters.bmad import BmadScripts
 from bmad_studio.adapters.state import RuntimeState
 from bmad_studio.api.routes import bmad as bmad_routes
 from bmad_studio.api.routes import changes as changes_routes
+from bmad_studio.api.routes import flows as flows_routes
 from bmad_studio.api.routes import projects as projects_routes
 from bmad_studio.api.routes import session as session_routes
 from bmad_studio.api.routes import web as web_routes
 from bmad_studio.core.credentials import CredentialStore
 from bmad_studio.core.errors import StartupError, StudioError
 from bmad_studio.core.path_guard import PathGuard
+from bmad_studio.core.flow.editor import FlowKind
 from bmad_studio.core.flow.files import file_validators
 from bmad_studio.core.paths import VedaPaths
 from bmad_studio.core.writes import RevertKind, TextKind, WritePipeline
@@ -90,7 +92,7 @@ def _install_body_limit(app: FastAPI) -> None:
 def _build_pipeline(settings: Settings) -> WritePipeline:
     state = RuntimeState(settings.runtime_dir)
     root = Path(settings.veda_root or ".")
-    kinds: dict = {"revert": RevertKind(state)}
+    kinds: dict = {"revert": RevertKind(state), "flow": FlowKind(VedaPaths(root))}
     if settings.enable_text_kind:
         kinds["text"] = TextKind()
     return WritePipeline(PathGuard(root), state, settings.session_secret_value(), kinds,
@@ -121,6 +123,7 @@ def create_app(settings: Settings | None = None, *, check: bool = True) -> FastA
     app.include_router(bmad_routes.router)
     app.include_router(changes_routes.router)
     app.include_router(projects_routes.router)
+    app.include_router(flows_routes.router)
     web_routes.mount_assets(app, settings.web_dist)
     web_routes.install_shell(app)  # ต้องอยู่ท้ายสุด: catch-all ของ SPA shell
     return app

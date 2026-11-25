@@ -19,6 +19,8 @@ MAY_NAME_REGISTRY = {
     # story 3-2: resolver อ่าน registry (อ่านอย่างเดียว: fs.read_bytes) และอ้างชื่อในข้อความ/skipReason
     SRC / "core" / "flow" / "status.py",
     SRC / "core" / "flow" / "resolve.py",
+    # story 4-1: flow editor อ่าน hasFrontend/ชื่อโปรเจกต์ผ่าน status.find_project (อ่านอย่างเดียว)
+    SRC / "core" / "flow" / "editor.py",
 }
 WRITE_CALLS = {
     "open", "write_text", "write_bytes", "write", "replace", "rename", "dump", "touch", "unlink",

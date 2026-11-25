@@ -168,6 +168,18 @@ def _sha(data: bytes | None) -> str | None:
     return None if data is None else hashlib.sha256(data).hexdigest()
 
 
+def _dedupe(issues: list[dict[str, str]]) -> list[dict[str, str]]:
+    """ตัด issue ที่ซ้ำทุก field (kind กับ file validator อาจตรวจกฎเดียวกันซ้ำ) — คงลำดับเดิม."""
+    seen: set[str] = set()
+    out = []
+    for item in issues:
+        key = json.dumps(item, sort_keys=True, ensure_ascii=True)
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out
+
+
 def _whitespace_errors(current: fs.TextDoc, proposed: bytes) -> list[dict[str, str]]:
     """ปฏิเสธ proposed ที่ไม่เปลี่ยน, ต่างเฉพาะ EOL/BOM, หรือต่างเฉพาะ whitespace ทั้งไฟล์ (AD-6)."""
     if current.exists and proposed == current.raw:
@@ -288,7 +300,8 @@ class WritePipeline:
                     "old_eof_newline": True, "new_eof_newline": True}
             if not errors:
                 errors.append({"code": "unsupported_encoding", "error": "ผลลัพธ์ไม่ใช่ข้อความ UTF-8"})
-        warnings = list(proposal.warnings)
+        errors = _dedupe(errors)
+        warnings = _dedupe(proposal.warnings)
         if diff.get("truncated"):
             if getattr(handler, "allow_truncated", False):
                 warnings.append({"code": "diff_summary_only",

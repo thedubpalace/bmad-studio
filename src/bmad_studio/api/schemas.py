@@ -310,3 +310,111 @@ class ProjectSummary(BaseModel):
 class ProjectListEnvelope(BaseModel):
     ok: Literal[True]
     data: list[ProjectSummary]
+
+
+# -- flow editor (story 4-1, REQ-046/047, AD-1/AD-12) — lock/overridden/validation คำนวณใน core.flow.editor -----
+
+class FlowStage(BaseModel):
+    id: str
+    agent: str
+    skill: str | None = None
+    enabled: bool
+    optional: bool
+    after: list[str]
+    gate: GateKind
+    produces: list[str]
+    condition: str | None = None
+
+
+class EntryConditionModel(BaseModel):
+    requirementsReady: bool
+    status: list[str]
+
+
+class FlowTrackModel(BaseModel):
+    entry_condition: EntryConditionModel | None = None
+    stages: list[FlowStage]
+
+
+class FlowModel(BaseModel):
+    version: int
+    tracks: dict[str, FlowTrackModel]
+
+
+class EditorStage(FlowStage):
+    locked: bool
+    lockReason: str | None = None
+    overridden: bool
+    overriddenFields: list[str] = []
+    default: StageDefault | None = None
+    mustFollowLocked: bool
+
+
+class LockedField(BaseModel):
+    field: str
+    reason: str
+
+
+class EditorTrack(BaseModel):
+    entry_condition: EntryConditionModel | None = None
+    stages: list[EditorStage]
+    lockedFields: list[LockedField] = []
+
+
+class FlowEditor(BaseModel):
+    project: str
+    target: str
+    hasFrontend: bool | None = None
+    base_sha256: str | None = None
+    editable: bool = True
+    notEditableReason: str | None = None
+    exists: bool
+    flow: FlowSource
+    version: int
+    tracks: dict[str, EditorTrack]
+    defaultFlow: FlowModel
+    issues: list[FlowIssue] = []
+    loadError: bool
+    policyFix: FlowModel | None = None
+    overrides: int
+    warnings: list[FlowIssue] = []
+
+
+class FlowEditorEnvelope(BaseModel):
+    ok: Literal[True]
+    data: FlowEditor
+
+
+class FlowDraftCheck(BaseModel):
+    errors: list[FlowIssue]
+    warnings: list[FlowIssue]
+    ackRequired: list[str]
+    overlay: dict[str, Any] | None = None
+    overrides: int
+    resetsToDefault: bool
+    tracks: dict[str, EditorTrack] | None = None
+
+
+class FlowDraftCheckEnvelope(BaseModel):
+    ok: Literal[True]
+    data: FlowDraftCheck
+
+
+class AgentName(BaseModel):
+    name: str
+    description: str
+
+
+class AgentNameListEnvelope(BaseModel):
+    ok: Literal[True]
+    data: list[AgentName]
+
+
+class SkillName(BaseModel):
+    id: str
+    description: str
+
+
+class SkillNameListEnvelope(BaseModel):
+    ok: Literal[True]
+    data: list[SkillName]

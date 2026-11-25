@@ -111,6 +111,14 @@ UI แสดง "ยังไม่มีขั้นที่ทำต่อไ
 ก่อน developer เมื่อมีหลายงาน) ไม่งั้นขั้น `pending`
 แรกที่ขั้นก่อนหน้าเสร็จ/ข้ามหมด (ขั้น optional เป็นทางเลือกสุดท้าย); ใน `full` ถ้า `requirementsReady` ไม่จริง next จะไม่เลย gate
 
+## แก้ flow ผ่านแอป (story 4-1)
+
+- `GET /api/flows/<project>` — effective flow ต่อ track; ทุกขั้นมี `locked`, `lockReason`, `overridden`, `overriddenFields`, `default`, `mustFollowLocked` (คำนวณใน `core.flow.editor`), `base_sha256` ของ overlay, `issues` + `policyFix` เมื่อไฟล์ที่โหลดผิด lock, `editable: false` เมื่อไฟล์ไม่ใช่ข้อความ
+- `POST /api/flows/<project>/validate` `{flow}` — errors/warnings จาก `validate_flow` ชุดเดียวกับ resolver, overlay ที่จะเขียน, `ackRequired`
+- บันทึก = `POST /api/changes/preview` kind `flow`, target `.veda/projects/<project>/flow.yaml`, payload `{flow, acknowledged?}` — ส่ง effective ที่แก้แล้ว **ไม่ใช่ overlay**; overlay สร้างจาก `to_overlay` เท่านั้น (เท่ากับ default = ย้าย overlay ไป backup)
+- ปิดขั้นออกแบบ UI (ปิด, เปลี่ยน agent, ไม่ produces designReady, condition อื่น, ย้ายหลังขั้นลงมือสร้าง) ในโปรเจกต์ที่ `hasFrontend` ไม่ใช่ `false` = warning `ux_disabled_frontend` ที่ต้องส่งใน `acknowledged` ไม่งั้น `errors[ux_disable_unconfirmed]`
+- ไฟล์เดิม ≤ 64 KiB แก้แบบรักษา comment (ruamel round-trip); comment ที่จะหาย = warning `comments_dropped`; รักษาไม่ได้ = เขียนใหม่ + warning `format_rewritten`
+
 ## Human gate ที่ล็อก (AD-8, REQ-047)
 
 ค่าคงที่ในโค้ด (`core/flow/policy.py`) ไม่ใช่ใน yaml — แก้ yaml แบบใดก็เลี่ยงไม่ได้:

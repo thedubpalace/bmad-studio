@@ -171,3 +171,40 @@ def test_invalid_values_are_422_not_500() -> None:
 def test_toml_array_of_tables_index() -> None:
     after = toml_set(CONFIG_TOML, ["extra", 0, "name"], "y")  # type: ignore[list-item]
     assert _changed_lines(CONFIG_TOML, after) == ['-name = "x"', '+name = "y"']
+
+
+
+# -- yaml_sync (story 4-1: overlay ของ flow editor) ---------------------------------------------
+
+from bmad_studio.core.errors import StudioError as _StudioError  # noqa: E402
+from bmad_studio.core.textedit import yaml_sync  # noqa: E402
+
+SYNC_DOC = "# head\na: 1  # keep a\nb:\n  c: [x, y]\n  d: true\ne: old\n"
+
+
+def test_yaml_sync_noop_keeps_bytes() -> None:
+    assert yaml_sync(SYNC_DOC, {"a": 1, "b": {"c": ["x", "y"], "d": True}, "e": "old"}) == SYNC_DOC
+
+
+def test_yaml_sync_changes_only_what_differs() -> None:
+    out = yaml_sync(SYNC_DOC, {"a": 1, "b": {"c": ["x", "y"], "d": False}, "e": "old"})
+    assert out == SYNC_DOC.replace("d: true", "d: false")
+
+
+def test_yaml_sync_deletes_and_adds_keys() -> None:
+    out = yaml_sync(SYNC_DOC, {"a": 1, "b": {"c": ["x", "y"]}, "f": 2})
+    assert "# head" in out and "# keep a" in out and "d:" not in out and "e:" not in out and "f: 2" in out
+
+
+def test_yaml_sync_distinguishes_bool_and_number_types() -> None:
+    assert yaml_sync("a: 1\nb: true\n", {"a": True, "b": 1}) == "a: true\nb: 1\n"
+
+
+def test_yaml_sync_mapping_to_scalar() -> None:
+    assert yaml_sync("a:\n  b: 1\n", {"a": "x"}) == "a: x\n"
+
+
+@pytest.mark.parametrize("text", ["- a\n", "a: &x 1\nb: *x\n", "a: [\n"])
+def test_yaml_sync_rejects_unpreservable(text: str) -> None:
+    with pytest.raises(_StudioError):
+        yaml_sync(text, {"a": 1})

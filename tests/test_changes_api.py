@@ -129,7 +129,9 @@ def test_text_kind_disabled_by_default(settings: Settings) -> None:
 
 
 def test_unknown_kind_and_bad_body(studio: Studio) -> None:
-    assert studio.preview(AGENT, "x\n", None, kind="flow").json()["code"] == "unknown_kind"
+    assert studio.preview(AGENT, "x\n", None, kind="no-such-kind").json()["code"] == "unknown_kind"
+    # kind flow มีจริงตั้งแต่ story 4-1 แต่เขียน agent ไม่ได้ (rule ของ kind)
+    assert studio.preview(AGENT, "x\n", None, kind="flow").json()["code"] == "path_forbidden"
     bad = studio.post("/api/changes/preview", {"kind": "text", "target": AGENT, "payload": {"text": 5}})
     assert bad.status_code == 422
     bad_sha = studio.post("/api/changes/preview", {"kind": "text", "target": AGENT, "base_sha256": "../x"})

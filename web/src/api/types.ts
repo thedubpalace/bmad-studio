@@ -8,6 +8,16 @@ export interface AgentItem {
   description?: string | null;
 }
 
+export interface AgentName {
+  name: string;
+  description: string;
+}
+
+export interface AgentNameListEnvelope {
+  ok: true;
+  data: Array<AgentName>;
+}
+
 export interface ChangeCommit {
   change_id: string;
   path: string;
@@ -116,6 +126,30 @@ export interface DiffLine {
   spans?: Array<Array<number>>;
 }
 
+export interface EditorStage {
+  id: string;
+  agent: string;
+  skill?: string | null;
+  enabled: boolean;
+  optional: boolean;
+  after: Array<string>;
+  gate: "none" | "human" | "agent-confirm";
+  produces: Array<string>;
+  condition?: string | null;
+  locked: boolean;
+  lockReason?: string | null;
+  overridden: boolean;
+  overriddenFields?: Array<string>;
+  default?: StageDefault | null;
+  mustFollowLocked: boolean;
+}
+
+export interface EditorTrack {
+  entry_condition?: EntryConditionModel | null;
+  stages: Array<EditorStage>;
+  lockedFields?: Array<LockedField>;
+}
+
 export interface EntryCheck {
   ok: boolean;
   requirementsReady: boolean;
@@ -124,11 +158,59 @@ export interface EntryCheck {
   reason?: string | null;
 }
 
+export interface EntryConditionModel {
+  requirementsReady: boolean;
+  status: Array<string>;
+}
+
 export interface ErrorEnvelope {
   ok: false;
   code: string;
   error: string;
   details?: unknown | null;
+}
+
+export interface FlowDraftBody {
+  flow: Record<string, unknown>;
+}
+
+export interface FlowDraftCheck {
+  errors: Array<FlowIssue>;
+  warnings: Array<FlowIssue>;
+  ackRequired: Array<string>;
+  overlay?: Record<string, unknown> | null;
+  overrides: number;
+  resetsToDefault: boolean;
+  tracks?: Record<string, EditorTrack> | null;
+}
+
+export interface FlowDraftCheckEnvelope {
+  ok: true;
+  data: FlowDraftCheck;
+}
+
+export interface FlowEditor {
+  project: string;
+  target: string;
+  hasFrontend?: boolean | null;
+  base_sha256?: string | null;
+  editable?: boolean;
+  notEditableReason?: string | null;
+  exists: boolean;
+  flow: FlowSource;
+  version: number;
+  tracks: Record<string, EditorTrack>;
+  defaultFlow: FlowModel;
+  issues?: Array<FlowIssue>;
+  loadError: boolean;
+  policyFix?: FlowModel | null;
+  overrides: number;
+  warnings?: Array<FlowIssue>;
+}
+
+export interface FlowEditorEnvelope {
+  ok: true;
+  data: FlowEditor;
 }
 
 export interface FlowIssue {
@@ -140,9 +222,26 @@ export interface FlowIssue {
   reason?: string | null;
 }
 
+export interface FlowModel {
+  version: number;
+  tracks: Record<string, FlowTrackModel>;
+}
+
 export interface FlowSource {
   default: string;
   overlay?: string | null;
+}
+
+export interface FlowStage {
+  id: string;
+  agent: string;
+  skill?: string | null;
+  enabled: boolean;
+  optional: boolean;
+  after: Array<string>;
+  gate: "none" | "human" | "agent-confirm";
+  produces: Array<string>;
+  condition?: string | null;
 }
 
 export interface FlowStatus {
@@ -166,6 +265,11 @@ export interface FlowStatusEnvelope {
   data: FlowStatus;
 }
 
+export interface FlowTrackModel {
+  entry_condition?: EntryConditionModel | null;
+  stages: Array<FlowStage>;
+}
+
 export interface FlowWarning {
   code: string;
   error: string;
@@ -187,6 +291,11 @@ export interface InventoryEnvelope {
 export interface Issue {
   code: string;
   error: string;
+}
+
+export interface LockedField {
+  field: string;
+  reason: string;
 }
 
 export interface LockedItem {
@@ -263,6 +372,16 @@ export interface SkillItem {
   description: string;
   override_team: boolean;
   override_user: boolean;
+}
+
+export interface SkillName {
+  id: string;
+  description: string;
+}
+
+export interface SkillNameListEnvelope {
+  ok: true;
+  data: Array<SkillName>;
 }
 
 export interface StageChip {

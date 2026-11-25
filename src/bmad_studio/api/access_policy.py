@@ -68,6 +68,9 @@ RULES: list[Rule] = [
     *_rules(STUDIO_READ, "GET", "/api/changes", "/api/changes/{change_id}"),
     # สถานะ flow ต่อโปรเจกต์ (REQ-050) — อ่านอย่างเดียว
     *_rules(STUDIO_READ, "GET", "/api/projects", "/api/projects/{name}/flow-status"),
+    # flow editor (REQ-046/047): อ่าน + ตรวจ draft (POST ไม่เขียนไฟล์ แต่ต้องผ่าน CSRF เหมือน mutation)
+    *_rules(STUDIO_READ, "GET", "/api/flows/{project}", "/api/agents/names", "/api/skills"),
+    *_rules(STUDIO_READ, "POST", "/api/flows/{project}/validate"),
     # SPA deep link (/p/..., /agents/...) ได้ shell เดียวกัน — ไม่รวม /api/* (ซึ่งต้องมี rule ของตัวเอง)
     Rule("GET", "/{path:path}", PUBLIC, exclude_prefixes=("/api/",)),
 ]

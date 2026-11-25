@@ -119,13 +119,11 @@ def _dump(yaml: YAML, data: Any, text: str) -> str:
     return out
 
 
-def yaml_set(text: str, path: Sequence[Key], value: Any, *, create: bool = False) -> str:
-    """คืน YAML ที่ค่าที่ ``path`` เปลี่ยนเป็น ``value``; ส่วนอื่นคงเดิม.
+def _preserving_dumper(text: str) -> tuple[Any, YAML]:
+    """โหลด ``text`` แบบ round-trip และหาชุดตั้งค่าที่ dump เอกสาร **ที่ยังไม่แก้** ออกมาตรงกับ text เดิมทุกตัวอักษร.
 
-    ruamel ไม่จำระยะเยื้อง/``---`` ต่อไฟล์ จึงหาชุดตั้งค่าที่ dump เอกสาร **ที่ยังไม่แก้** ออกมาได้
-    ตรงกับ text เดิมทุกตัวอักษรก่อน แล้วค่อยแก้และ dump ด้วยชุดนั้น — ถ้าไม่มีชุดใดรักษารูปแบบได้
-    (หลายเอกสาร, anchor, comment ก่อน ``---`` ฯลฯ) ปฏิเสธด้วย ``format_not_preservable``
-    แทนการคืน diff ที่แตะบรรทัดอื่น (REQ-043 c).
+    ruamel ไม่จำระยะเยื้อง/``---`` ต่อไฟล์ จึงลองหลายชุด — ไม่มีชุดใดรักษารูปแบบได้ (หลายเอกสาร, anchor,
+    comment ก่อน ``---`` ฯลฯ) = ``format_not_preservable`` แทนการคืน diff ที่แตะบรรทัดอื่น (REQ-043 c).
     """
     try:
         _data, guess_seq, guess_offset = load_yaml_guess_indent(text)
@@ -154,10 +152,53 @@ def yaml_set(text: str, path: Sequence[Key], value: Any, *, create: bool = False
     if chosen is None or _has_anchor(data):
         # anchor/alias: แก้ค่าที่ถูกอ้างแล้ว ruamel ย้าย anchor ไปที่ alias ตัวถัดไป = diff หลายบรรทัด
         raise _not_preservable()
+    return data, chosen
+
+
+def yaml_set(text: str, path: Sequence[Key], value: Any, *, create: bool = False) -> str:
+    """คืน YAML ที่ค่าที่ ``path`` เปลี่ยนเป็น ``value``; ส่วนอื่นคงเดิม (ดู :func:`_preserving_dumper`)."""
+    data, chosen = _preserving_dumper(text)
     _set_in(data, path, value, create=create)
     try:
         return _dump(chosen, data, text)
     except YAMLError:  # RepresenterError: ชนิดค่าที่ YAML แสดงไม่ได้
+        raise _invalid_value() from None
+
+
+def _same(a: Any, b: Any) -> bool:
+    """เท่ากันตามค่า YAML (``True`` ไม่เท่า ``1``; CommentedSeq เท่า list)."""
+    if isinstance(a, Mapping) and isinstance(b, Mapping):
+        return set(a.keys()) == set(b.keys()) and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    if isinstance(a, (Mapping, list)) or isinstance(b, (Mapping, list)):
+        return False
+    return isinstance(a, bool) == isinstance(b, bool) and a == b and (a is None) == (b is None)
+
+
+def _sync(node: Any, target: Any) -> Any:
+    """ทำให้ ``node`` (round-trip) มีค่าเท่า ``target`` โดยแตะเฉพาะส่วนที่ต่าง — คืน node ใหม่ถ้าต้องแทนทั้งก้อน."""
+    if isinstance(node, Mapping) and isinstance(target, Mapping):
+        for key in [k for k in node if k not in target]:
+            del node[key]
+        for key, value in target.items():
+            node[key] = _sync(node[key], value) if key in node else value
+        return node
+    return node if _same(node, target) else target
+
+
+def yaml_sync(text: str, data: Mapping[str, Any]) -> str:
+    """คืน YAML ที่มีค่าเท่า ``data`` ทั้งเอกสาร โดยคง comment/รูปแบบของส่วนที่ค่าไม่เปลี่ยน.
+
+    raise ``format_not_preservable``/``invalid_yaml`` ถ้ารักษารูปแบบไม่ได้ — ผู้เรียกเลือกเขียนใหม่ทั้งไฟล์เอง.
+    """
+    doc, chosen = _preserving_dumper(text)
+    if not isinstance(doc, Mapping):
+        raise _not_preservable()
+    _sync(doc, data)
+    try:
+        return _dump(chosen, doc, text)
+    except YAMLError:
         raise _invalid_value() from None
 
 
