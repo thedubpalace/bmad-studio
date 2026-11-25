@@ -247,7 +247,8 @@ class WritePipeline:
         return []
 
     def _lock(self, path: GuardedPath) -> threading.Lock:
-        key = os.path.normcase(os.fspath(path.path))
+        # ไฟล์ flow ทุกไฟล์ใช้ lock เดียว: overlay ถูกตรวจกับ default ปัจจุบัน — default ต้องไม่เปลี่ยนระหว่างตรวจกับเขียน
+        key = "flow-files" if path.rule in VALIDATED_RULES else os.path.normcase(os.fspath(path.path))
         with self._locks_guard:
             return self._locks.setdefault(key, threading.Lock())
 
@@ -358,6 +359,13 @@ class WritePipeline:
                                   {"current_sha256": _sha(original)})
             if not os.path.isdir(os.path.dirname(os.fspath(guarded.path))):
                 raise StudioError("parent_missing", "ไม่มีโฟลเดอร์ปลายทาง", 422)
+            if not delete:
+                # ตรวจซ้ำใต้ lock: default/catalog อาจเปลี่ยนระหว่าง preview กับ commit (TTL 10 นาที).
+                # การลบ (ย้ายไป backup) ไม่ตรวจ: ไม่มี bytes ใหม่ — ลบ overlay = กลับไปใช้ default ซึ่ง resolver ตรวจทุกครั้ง
+                late = self._validate(guarded.rule, proposed)
+                if late:
+                    raise StudioError("has_errors", "ไฟล์นี้ไม่ผ่านการตรวจแล้ว (มีการเปลี่ยนแปลงหลังตัวอย่าง) — เปิดตัวอย่างใหม่",
+                                      422, {"errors": late})
             change_id = uuid.uuid4().hex
             now = self.clock()
             record = {

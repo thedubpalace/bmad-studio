@@ -183,19 +183,35 @@ def _catalog_issues(name: str, track: Track, catalog: Catalog) -> list[dict[str,
     return issues
 
 
+#: skill ที่ลงมือสร้างโค้ด — ต้องมาหลังขั้นวางแผนเหมือน agent developer ไม่ว่า agent ของขั้นจะเป็นใคร
+BUILD_SKILLS = frozenset({"bmad-build", "bmad-build-auto", "bmad-agent-dev", "bmad-qa-generate-e2e-tests"})
+assert BUILD_SKILLS <= policy.GATED_SKILLS  # skill ที่สร้างโค้ดต้องห้ามก่อน gate ด้วย — สองรายการต้องไม่ลอยออกจากกัน
+
+
+def needs_plan(stage: Stage) -> bool:
+    return stage.agent == "developer" or (stage.skill is not None and stage.skill in BUILD_SKILLS)
+
+
 def _plan_gate_issues(name: str, track: Track) -> list[dict[str, str]]:
-    """REQ-046: ขั้น developer ต้องตามหลังขั้นที่ produces planReady (architect) ที่ enabled."""
+    """REQ-046: ขั้นที่ลงมือสร้าง (agent developer หรือ skill build) ต้องตามหลังขั้นวางแผนที่ produces planReady.
+
+    ขั้นวางแผนนับเฉพาะที่ enabled และ**ไม่มี condition** — ขั้นที่มี condition ถูกข้ามได้ตาม flag ของโปรเจกต์
+    แล้ว developer จะถูกส่งไปทำโดยไม่มีแผน (review 3-1 B1).
+    """
     issues = []
     if name != policy.FULL:
         return issues  # quick เข้าได้เฉพาะโปรเจกต์ที่พัฒนาแล้ว (entry_condition)
     by_id = {s.id: s for s in track.stages}
     for stage in track.stages:
-        if not stage.enabled or stage.agent != "developer":
+        if not stage.enabled or not needs_plan(stage):
             continue
         before = policy.ancestors(track.stages, stage.id)
-        if not any(a in by_id and by_id[a].enabled and "planReady" in by_id[a].produces for a in before):
-            issues.append(issue("plan_gate_missing", f"ขั้น {stage.id} (developer) ต้องมาหลังขั้นวางแผนที่ produces planReady",
-                                track=name, stage=stage.id))
+        # ขั้นวางแผนที่มี condition นับได้เฉพาะเมื่อขั้นสร้างมี condition เดียวกัน (ถูกข้าม/ทำพร้อมกันเสมอ)
+        if not any(a in by_id and by_id[a].enabled and by_id[a].condition in (None, stage.condition)
+                   and "planReady" in by_id[a].produces for a in before):
+            issues.append(issue("plan_gate_missing",
+                                f"ขั้น {stage.id} ({stage.agent}{', ' + stage.skill if stage.skill else ''}) ต้องมาหลังขั้นวางแผน"
+                                " ที่ produces planReady ซึ่งเปิดอยู่และไม่มี condition", track=name, stage=stage.id))
     return issues
 
 

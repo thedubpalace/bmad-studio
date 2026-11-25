@@ -184,8 +184,10 @@ export function ProjectFlowPage() {
           </span>
         ) : data.next ? (
           <span className="mono-mix">{nextText(data.next)}</span>
-        ) : (
+        ) : data.complete ? (
           <span>{th.flow.nextNone}</span>
+        ) : (
+          <span>{th.flow.nextBlocked}</span>
         )}
         {data.next?.gate === "human" && reviewUrl ? <ReviewLink href={reviewUrl} /> : null}
       </div>

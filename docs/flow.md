@@ -55,7 +55,7 @@ YAML ที่รับ: document เดียว, ไม่มี directive (`%
 | `duplicate_stage`, `duplicate_after`, `unknown_after` | id ซ้ำ / after ซ้ำ / after อ้างขั้นที่ไม่มี |
 | `cycle`, `no_predecessor`, `unreachable` | ลำดับวน / มีขั้นเริ่มต้นเกินหนึ่ง / ไปไม่ถึงจากขั้นเริ่มต้น |
 | `unknown_agent`, `unknown_skill` | agent/skill ไม่มีไฟล์ใน `.claude/` |
-| `plan_gate_missing` | ขั้น developer ใน full ไม่มีขั้นที่ enabled และ produces `planReady` มาก่อน |
+| `plan_gate_missing` | ขั้นที่ลงมือสร้าง (agent `developer` หรือ skill `bmad-build`/`bmad-build-auto`) ใน full ไม่มีขั้นที่ enabled, **ไม่มี condition** และ produces `planReady` มาก่อน |
 | `locked_gate_violation` | ละเมิด human gate ที่ล็อก (ด้านล่าง) |
 | `validator_missing` | write pipeline ไม่มี validator ของไฟล์ flow — ปฏิเสธไว้ก่อน (fail closed) |
 | `unknown_stage`, `unknown_track` | overlay แก้ขั้น/track ที่ไม่มีใน default (ขั้นใหม่ใช้ `add`) |
@@ -63,6 +63,10 @@ YAML ที่รับ: document เดียว, ไม่มี directive (`%
 | `cannot_remove_track` | `to_overlay` ได้ effective ที่ไม่มี track ของ default |
 | `flow_unreadable` | อ่านไฟล์ flow ไม่ได้ (ไม่ใช่ไฟล์/ไม่มีสิทธิ์) |
 | `default_invalid` | ตรวจ overlay ไม่ได้เพราะ `.veda/flow.default.yaml` ผิดกฎ (ไม่ fallback ไป default ของแพ็กเกจ) |
+
+การเขียนไฟล์ flow (ทุก kind รวม revert) ตรวจตอน preview และ**ตรวจซ้ำตอน commit** ภายใต้ lock เดียวของไฟล์ flow ทั้งหมด —
+ถ้า default/agent/skill เปลี่ยนระหว่าง preview กับ commit จนผิดกฎ commit คืน `has_errors` (422) และไม่เขียน (เปิดตัวอย่างใหม่);
+แก้ default แล้วตรวจ overlay ของทุกโปรเจกต์ยังไม่ทำ (story 4-3)
 
 `yaml_invalid` มี `reason` บอกสาเหตุละเอียด: `yaml_alias`, `yaml_anchor`, `yaml_tag`, `yaml_directive`, `yaml_merge_key`,
 `yaml_multi_document`, `yaml_complex_key`, `yaml_duplicate_key`, `yaml_too_large`, `yaml_too_deep`, `yaml_invalid`;
@@ -89,8 +93,8 @@ uv run --project C:/Users/thedu/code/bmad-studio python -m bmad_studio.cli flow 
 
 | ขั้น | เสร็จเมื่อ |
 | --- | --- |
-| ปิด (`enabled: false`) หรือ `condition` เป็น false | `skipped` พร้อมเหตุผล (registry ไม่มีค่า = ไม่ข้าม + คำเตือน `condition_unknown`) |
-| `requirements-review` | `requirementsReady === true` ใน registry เท่านั้น; ขั้นก่อนหน้าเสร็จ = `active` (รอคนที่ `/review`) |
+| ปิด (`enabled: false`) หรือ `condition` เป็น boolean `false` | `skipped` พร้อมเหตุผล (registry ไม่มีค่า หรือค่าไม่ใช่ true/false เช่น `"true"`/`1`/`null` = ไม่ข้าม + คำเตือน `condition_unknown`) |
+| `requirements-review` | `requirementsReady === true` (boolean) ใน registry เท่านั้น — `"true"`/`1` ไม่นับ; ขั้นก่อนหน้าเสร็จ = `active` (รอคนที่ `/review`) |
 | ขั้นที่มี `produces` | ทุก flag ใน registry เป็น `true` |
 | project-bootstrapper | มีใน registry |
 | ba | มี `requirements.md` |
@@ -99,6 +103,9 @@ uv run --project C:/Users/thedu/code/bmad-studio python -m bmad_studio.cli flow 
 | reviewer (`retrospective`) | ทุก epic `done` และ `epic-N-retrospective: done`; epic ที่จบแล้วแต่ยังไม่มี retro = `active` (แม้ epic อื่นยังพัฒนา); ไม่มี epic หรือโปรเจกต์ที่พัฒนาแล้วโดยไม่มี sprint-status = `skipped` |
 | devops | registry มี `dockerImage`/`containerName` หรือ `status: deployed` |
 | quick: developer / reviewer | `quick/*.md` ที่ status in-progress/ready-for-dev/draft = งาน developer, review/in-review = งาน reviewer |
+
+`next: null` + `complete: false` = flow ยังไม่จบแต่ไม่มีขั้นที่ทำต่อได้ (เช่น เข้า track ไม่ได้ หรือขั้นที่ไม่มีสัญญาณสถานะ) —
+UI แสดง "ยังไม่มีขั้นที่ทำต่อได้" ไม่ใช่ "จบแล้ว"
 
 ขั้นถัดไป = ขั้น `active` ที่ลึกสุดซึ่ง**บรรพบุรุษทุกขั้น**เสร็จ/ข้าม/active (ขั้น developer/reviewer ไม่บล็อกกันเอง; reviewer/retro
 ก่อน developer เมื่อมีหลายงาน) ไม่งั้นขั้น `pending`

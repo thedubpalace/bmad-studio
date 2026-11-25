@@ -194,3 +194,20 @@ def test_every_kind_is_validated_not_only_revert(flow_root: Path, tmp_path: Path
     bare = pipeline(flow_root, tmp_path / "rt2", None)
     preview = bare.preview(ChangeRequest("flow-text", DEFAULT_TARGET, {"text": bypass_text()}, None), FP, "admin")
     assert [e["code"] for e in preview["errors"]] == ["validator_missing"]
+
+
+def test_commit_revalidates_under_lock(flow_root: Path, tmp_path: Path) -> None:
+    """review 3-1 N4: preview ผ่าน แต่ default เปลี่ยนก่อน commit → commit ปฏิเสธและไม่เขียน."""
+    folder = flow_root / ".veda" / "projects" / "demo"
+    folder.mkdir()
+    target = flow_root / PROJECT_TARGET
+    pipe = pipeline(flow_root, tmp_path / "rt", file_validators(VedaPaths(flow_root)))
+    text = "extends: default\ntracks:\n  full:\n    stages:\n      devops: {enabled: false}\n"
+    preview = pipe.preview(ChangeRequest("flow-text", PROJECT_TARGET, {"text": text}, None), FP, "admin")
+    assert preview["errors"] == []
+    data = default_data()  # default ใหม่ที่ไม่มีขั้น devops → overlay อ้างขั้นที่ไม่มี
+    data["tracks"]["full"]["stages"] = [s for s in data["tracks"]["full"]["stages"] if s["id"] != "devops"]
+    (flow_root / ".veda" / "flow.default.yaml").write_text(dump(data), encoding="utf-8")
+    with pytest.raises(StudioError) as info:
+        pipe.commit(preview["preview_id"], preview["confirm_token"], FP, "admin", "flow.yaml")
+    assert info.value.code == "has_errors" and not target.exists()

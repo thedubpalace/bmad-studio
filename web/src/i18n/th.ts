@@ -188,6 +188,7 @@ export const th = {
     trackQuick: "quick",
     nextStep: "ขั้นถัดไป",
     nextNone: "ไม่มี — flow นี้จบแล้ว",
+    nextBlocked: "ยังไม่มีขั้นที่ทำต่อได้ (flow ยังไม่จบ) — ดูสถานะและเหตุผลของแต่ละขั้นด้านล่าง",
     gateLabel: "gate",
     gate: { none: "ไม่มี", human: "คนอนุมัติ", "agent-confirm": "agent ยืนยัน" } as Record<string, string>,
     status: { done: "เสร็จ", active: "กำลังทำ", pending: "รอ", skipped: "ข้าม" } as Record<string, string>,

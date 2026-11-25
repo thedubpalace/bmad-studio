@@ -54,13 +54,25 @@ def topo_order(track: Track) -> list[str]:
     return out  # validator รับรองว่าไม่มี cycle → ครบทุกขั้น
 
 
+def _json_kind(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return f"ข้อความ {value!r}"[:60]
+    if isinstance(value, (int, float)):
+        return f"ตัวเลข {value}"
+    return "array" if isinstance(value, list) else "object"
+
+
 def _skip_reason(stage: Any, state: ProjectState) -> str | None:
     if not stage.enabled:
         return "ปิดไว้ใน flow (enabled: false)"
-    if stage.condition is not None and not state.flag(stage.condition):
-        if stage.condition not in state.registry:
-            return None  # ไม่มีค่า = ไม่รู้ — ไม่ข้ามเอง (resolve_track ใส่คำเตือน)
-        return f"condition {stage.condition} ไม่เป็นจริงใน registry"
+    if stage.condition is not None:
+        known = state.flag_known(stage.condition)
+        if known is None:
+            return None  # ไม่มีค่า/ไม่ใช่ true-false = ไม่รู้ — ไม่ข้ามเอง (resolve_track ใส่คำเตือน)
+        if known is False:
+            return f"condition {stage.condition} เป็น false ใน registry"
     return None
 
 
@@ -77,9 +89,11 @@ def resolve_track(effective: Effective, track_name: str, state: ProjectState) ->
     warnings: list[dict[str, str]] = []
     for sid in order:
         stage = by_id[sid]
-        if stage.enabled and stage.condition is not None and stage.condition not in state.registry:
+        if stage.enabled and stage.condition is not None and state.flag_known(stage.condition) is None:
+            what = ("ไม่มี " + stage.condition if stage.condition not in state.registry
+                    else f"{stage.condition} ไม่ใช่ true/false (เป็น {_json_kind(state.registry[stage.condition])})")
             warnings.append({"code": "condition_unknown", "stage": sid,
-                             "error": f"registry ไม่มี {stage.condition} — ไม่ข้ามขั้น {sid} เอง ตั้งค่าใน registry ให้ชัด"})
+                             "error": f"registry {what} — ไม่ข้ามขั้น {sid} เอง ตั้งค่าเป็น true/false ใน registry"})
         reason = _skip_reason(stage, state)
         if reason is not None:
             status, note = SKIPPED, None
@@ -118,7 +132,9 @@ def resolve_track(effective: Effective, track_name: str, state: ProjectState) ->
     nxt = None if entry is not None and not entry["ok"] else _pick_next(order, by_id, rows, loose)
     if nxt is not None and track_name == policy.FULL and not state.flag(policy.GATE_FLAG):
         stage = by_id[nxt]
-        if not policy.pre_gate_allowed(stage) and nxt != policy.GATE_STAGE_ID:  # ไม่ควรเกิดถ้า validator ผ่าน
+        # ด่านนี้ทำงานจริงกับ flow ที่ถูกต้อง: เมื่อ gate กำลังรอคน (active) แต่ developer/reviewer มีงาน active
+        # _pick_next เลือกขั้น active ที่ลึกสุด — ด่านนี้ส่งกลับไปที่ขั้นก่อน gate/ตัว gate (review 3-2 N5)
+        if not policy.pre_gate_allowed(stage) and nxt != policy.GATE_STAGE_ID:
             # ด่านสุดท้าย AD-8: ขั้นก่อน gate ที่ยังไม่เสร็จก่อน แล้วจึง gate
             pre = [sid for sid in order if sid in policy.ancestors(track.stages, policy.GATE_STAGE_ID)
                    and rows[sid]["status"] not in SATISFIED]

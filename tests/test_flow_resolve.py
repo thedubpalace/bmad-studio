@@ -386,3 +386,74 @@ def test_cli_runs_standalone_without_server(veda: Path) -> None:
                           capture_output=True, timeout=60)
     assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
     assert json.loads(proc.stdout.decode("utf-8"))["next"]["stage"] == "architecture"
+
+
+# -- rework round 1 (review 3-2 B1, N5, N7) ------------------------------------
+
+@pytest.mark.parametrize("value", ["true", 1, None, "false", 0, 1.0, [True]])
+def test_non_boolean_condition_is_not_skipped(veda: Path, capsys, value) -> None:
+    registry(veda, {"name": "demo", "requirementsReady": True, "hasFrontend": value})
+    _code, data = run(veda, capsys, "demo")
+    ux = next(s for s in data["stages"] if s["id"] == "ux-design")
+    assert ux["status"] != "skipped" and data["next"]["stage"] == "ux-design"
+    warn = [w for w in data["warnings"] if w["code"] == "condition_unknown"]
+    assert warn and warn[0]["stage"] == "ux-design" and "true/false" in warn[0]["error"]
+    assert not any(t in warn[0]["error"] for t in ("NoneType", "str)", "int)", "float)", "list)"))  # ไม่ใช่ชื่อ type ของ Python
+
+
+def test_boolean_false_condition_still_skips(veda: Path, capsys) -> None:
+    registry(veda, {"name": "demo", "requirementsReady": True, "hasFrontend": False})
+    _code, data = run(veda, capsys, "demo")
+    assert data["next"]["stage"] == "architecture" and data["warnings"] == []
+
+
+@pytest.mark.parametrize("value", ["true", 1, None, "True"])
+def test_non_boolean_gate_and_entry_flags_fail_closed(veda: Path, capsys, value) -> None:
+    registry(veda, {"name": "demo", "requirementsReady": value, "hasFrontend": False, "status": "running",
+                    "planReady": True})
+    (project_dir(veda, "demo") / "requirements.md").write_text("x\n", encoding="utf-8")
+    assert nxt(veda, capsys, "demo") == "requirements-review"
+    assert run(veda, capsys, "demo", "--track", "quick")[1]["entry"]["ok"] is False
+    registry(veda, {"name": "demo", "requirementsReady": True, "hasFrontend": False, "planReady": True, "status": 5})
+    assert run(veda, capsys, "demo", "--track", "quick")[1]["entry"]["ok"] is False
+    registry(veda, {"name": "demo", "requirementsReady": True, "hasFrontend": False, "planReady": True,
+                    "status": "running"})
+    assert run(veda, capsys, "demo", "--track", "quick")[1]["entry"]["ok"] is True  # ควบคุม: ค่าถูกชนิดผ่าน
+
+
+def test_ad8_backstop_redirects_active_loop_work_to_the_gate(veda: Path, capsys) -> None:
+    """ด่านสุดท้ายของ AD-8 ทำงานจริงกับ flow ที่ถูกต้อง: gate รอคน + มี story รอ review."""
+    from bmad_studio.core.flow.merge import effective_for
+    from bmad_studio.core.flow.resolve import _pick_next, resolve_track, topo_order
+    from bmad_studio.core.flow.status import find_project, load_state
+    from bmad_studio.core.paths import VedaPaths
+
+    registry(veda, {"name": "demo", "requirementsReady": False, "hasFrontend": False, "planReady": True,
+                    "status": "developing"})
+    (project_dir(veda, "demo") / "requirements.md").write_text("x\n", encoding="utf-8")
+    sprint(veda, "demo", {"epic-1": "in-progress", "1-1-a": "review"})
+    paths = VedaPaths(veda)
+    eff = effective_for(paths, "demo", None)
+    state = load_state(paths, find_project(paths, "demo"))
+    result = resolve_track(eff, "full", state)
+    rows = {s["id"]: s for s in result["stages"]}
+    track = eff.flow.tracks["full"]
+    by_id = {s.id: s for s in track.stages}
+    # ไม่มีด่านนี้ ขั้นที่ถูกเลือกจะเลย gate
+    assert _pick_next(topo_order(track), by_id, rows, False) == "review"
+    assert result["next"]["stage"] == "requirements-review" and result["complete"] is False
+
+
+@pytest.mark.parametrize("name", ["demo.", "Demo", "CON", "nul", "com1.x"])
+def test_aliasing_registry_names_are_rejected(veda: Path, capsys, name: str) -> None:
+    """ชื่อที่ NTFS ชี้ไปโฟลเดอร์ของโปรเจกต์อื่น (จุดท้าย, ต่างตัวพิมพ์) หรือเป็นอุปกรณ์ (CON/NUL/COMn)."""
+    registry(veda, {"name": "demo", "requirementsReady": True})
+    data = json.loads((veda / ".veda" / "projects" / "registry.json").read_text(encoding="utf-8"))
+    data["projects"].append({"name": name, "requirementsReady": True})
+    (veda / ".veda" / "projects" / "registry.json").write_text(json.dumps(data), encoding="utf-8")
+    exit_code, out = run(veda, capsys, name)
+    assert exit_code == 2 and out["code"] == "project_not_found"
+    from bmad_studio.core.flow.status import read_registry
+    from bmad_studio.core.paths import VedaPaths
+
+    assert [p["name"] for p in read_registry(VedaPaths(veda))] == ["demo"]

@@ -182,6 +182,22 @@ describe("projects views", () => {
     expect(text()).toContain("QUICK-BLOCKED");
   });
 
+  it("says why when there is no next step but the flow is not complete", async () => {
+    fetchMock.mockResolvedValue(json(200, { ok: true, data: { ...status, next: null, complete: false } }));
+    await render("/p/gatey");
+    const callout = container.querySelector(".callout")?.textContent ?? "";
+    expect(callout).toContain("ยังไม่มีขั้นที่ทำต่อได้");
+    expect(callout).not.toContain("จบแล้ว");
+  });
+
+  it("says the flow is finished when complete and there is no next step", async () => {
+    fetchMock.mockResolvedValue(json(200, { ok: true, data: { ...status, next: null, complete: true } }));
+    await render("/p/gatey");
+    const callout = container.querySelector(".callout")?.textContent ?? "";
+    expect(callout).toContain("จบแล้ว");
+    expect(callout).not.toContain("ยังไม่มีขั้นที่ทำต่อได้");
+  });
+
   it("shows field-level locks from the API", async () => {
     fetchMock.mockResolvedValue(json(200, { ok: true, data: { ...status, locked: [...status.locked, { field: "entry_condition", reason: "ล็อกเงื่อนไขเข้า quick" }] } }));
     await render("/p/gatey");

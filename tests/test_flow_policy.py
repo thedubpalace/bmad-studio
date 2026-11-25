@@ -258,3 +258,38 @@ def test_issue_for_every_problem_not_only_the_first() -> None:
         stage(d, "devops")["agent"] = "ghost"
 
     assert {"locked_gate_violation", "unknown_agent"} <= codes(check(mutate))
+
+
+# -- rework round 1 (review 3-1 B1): plan gate นับเฉพาะขั้นวางแผนที่เปิดและไม่มี condition, ตรวจตาม skill ด้วย --
+
+def test_plan_producer_with_condition_does_not_count() -> None:
+    issues = check(lambda d: stage(d, "architecture").update(condition="hasFrontend"))
+    assert any(i["code"] == "plan_gate_missing" and i["stage"] == "develop" for i in issues)
+
+
+@pytest.mark.parametrize("skill", ["bmad-build", "bmad-build-auto", "bmad-agent-dev", "bmad-qa-generate-e2e-tests"])
+def test_build_skill_on_any_agent_needs_plan(skill: str) -> None:
+    def mutate(d: dict[str, Any]) -> None:
+        stage(d, "architecture")["enabled"] = False
+        stage(d, "develop")["enabled"] = False
+        d["tracks"]["full"]["stages"].append({"id": "sneaky-build", "agent": "reviewer", "skill": skill,
+                                              "after": ["ux-design"]})
+
+    issues = check(mutate)
+    assert any(i["code"] == "plan_gate_missing" and i["stage"] == "sneaky-build" for i in issues)
+
+
+def test_plan_and_build_with_the_same_condition_is_allowed() -> None:
+    data = default_data()
+    stage(data, "architecture")["condition"] = "designReady"
+    stage(data, "develop")["condition"] = "designReady"
+    assert "plan_gate_missing" not in codes(validate_data(data, CATALOG)[1])
+    stage(data, "develop")["condition"] = "hasFrontend"  # condition ต่างกัน = ข้ามแผนได้โดยยังสร้าง
+    assert "plan_gate_missing" in codes(validate_data(data, CATALOG)[1])
+
+
+def test_build_skill_after_plan_is_allowed() -> None:
+    data = default_data()
+    data["tracks"]["full"]["stages"].append({"id": "extra-build", "agent": "reviewer", "skill": "bmad-build",
+                                             "after": ["architecture"]})
+    assert validate_data(data, CATALOG)[1] == []

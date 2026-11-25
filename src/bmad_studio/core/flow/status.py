@@ -27,6 +27,7 @@ DONE, ACTIVE, PENDING, SKIPPED = "done", "active", "pending", "skipped"
 DEVELOPED_STATUSES = frozenset({"developed", "running", "deployed"})
 MAX_REGISTRY_BYTES = 2 * 1024 * 1024
 MAX_STATE_BYTES = 512 * 1024
+_DEVICE = re.compile(r"(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$)", re.IGNORECASE)
 _SAFE_PROJECT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", re.ASCII)
 _STORY_KEY = re.compile(r"\d+-\d+(?:-[a-z0-9-]+)?", re.ASCII)
 _EPIC_KEY = re.compile(r"epic-(\d+)", re.ASCII)
@@ -42,7 +43,11 @@ class ProjectNotFound(StudioError):
 
 
 def valid_project_name(name: object) -> bool:
-    return isinstance(name, str) and bool(_SAFE_PROJECT.fullmatch(name)) and ".." not in name
+    """ชื่อโปรเจกต์ที่ใช้สร้าง path ได้: ASCII ปลอดภัย, ไม่มี ``..``, ไม่ลงท้ายด้วยจุด
+    (NTFS ตัดจุด/ช่องว่างท้ายชื่อ: ``veda.`` = โฟลเดอร์ของ ``veda``)."""
+    # ช่องว่างถูก regex ตัดอยู่แล้ว; ชื่ออุปกรณ์ของ Windows (CON, NUL, COM1 …) ไม่ใช่โฟลเดอร์
+    return (isinstance(name, str) and bool(_SAFE_PROJECT.fullmatch(name)) and ".." not in name
+            and not name.endswith(".") and not _DEVICE.fullmatch(name.split(".")[0]))
 
 
 def read_registry(paths: VedaPaths) -> list[dict[str, Any]]:
@@ -64,8 +69,9 @@ def read_registry(paths: VedaPaths) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for p in projects:
-        if isinstance(p, dict) and valid_project_name(p.get("name")) and p["name"] not in seen:
-            seen.add(p["name"])  # ชื่อซ้ำ: ใช้รายการแรก (find_project ก็ใช้รายการแรก)
+        # ชื่อซ้ำ (ไม่สนตัวพิมพ์ — NTFS ใช้โฟลเดอร์เดียวกัน): ใช้รายการแรก
+        if isinstance(p, dict) and valid_project_name(p.get("name")) and p["name"].casefold() not in seen:
+            seen.add(p["name"].casefold())
             out.append(p)
     return out
 
@@ -74,7 +80,7 @@ def find_project(paths: VedaPaths, name: str) -> dict[str, Any]:
     if not valid_project_name(name):
         raise ProjectNotFound()
     for entry in read_registry(paths):
-        if entry.get("name") == name:  # ตรงตัวพิมพ์ — ชื่อโฟลเดอร์มาจาก registry
+        if entry.get("name") == name:  # ตรงตัวพิมพ์ — ชื่อโฟลเดอร์มาจาก registry (ซ้ำแบบต่างตัวพิมพ์ถูกตัดแล้ว)
             return entry
     raise ProjectNotFound()
 
@@ -93,10 +99,17 @@ class ProjectState:
     warnings: list[dict[str, str]] = field(default_factory=list)
 
     def flag(self, name: str) -> bool:
+        """flag เป็นจริงเฉพาะค่า boolean ``true`` (``"true"``, ``1`` = ไม่จริง — fail closed สำหรับขั้นที่ "เสร็จ")."""
         return self.registry.get(name) is True
+
+    def flag_known(self, name: str) -> bool | None:
+        """ค่า boolean ของ flag หรือ ``None`` เมื่อไม่มี/ไม่ใช่ boolean (ใช้ตัดสินการข้าม — ไม่รู้ = ไม่ข้าม)."""
+        value = self.registry.get(name)
+        return value if isinstance(value, bool) else None
 
     @property
     def status(self) -> str:
+        """status ของ registry ที่เป็นข้อความ — ชนิดอื่น = ว่าง (entry ของ quick ไม่ผ่าน: fail closed)."""
         value = self.registry.get("status")
         return value if isinstance(value, str) else ""
 
