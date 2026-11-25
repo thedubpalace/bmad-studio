@@ -84,6 +84,8 @@ export const th = {
     errorsTitle: "ต้องแก้ก่อนบันทึก",
     whitespaceOnly: "diff นี้เปลี่ยน line ending ทั้งไฟล์ — ไม่ใช่ที่ตั้งใจ",
     noHunks: "ไม่มีบรรทัดที่เปลี่ยน",
+    diffTruncated: (added: number, removed: number) =>
+      `diff นี้ใหญ่เกินกว่าจะแสดงรายบรรทัด (+${added} −${removed} บรรทัด) — แบ่งแก้เป็นส่วนเล็กลง`,
     eofAdded: "เพิ่ม newline ท้ายไฟล์",
     eofRemoved: "ไม่มี newline ท้ายไฟล์",
     fold: (n: number) => `… ${n} บรรทัดที่ไม่เปลี่ยน`,

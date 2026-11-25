@@ -13,7 +13,7 @@ export type Outcome =
   | { kind: "expired"; error: ApiError }
   /** ไม่รู้ว่าเขียนไปแล้วหรือยัง (เครือข่ายขาดหลังส่ง, 5xx ที่ไม่ใช่ 503) — ให้ไปดูที่ /changes */
   | { kind: "unknown"; error: ApiError }
-  /** server ยืนยันว่าไม่มีอะไรเปลี่ยน (4xx, 503) — ลองใหม่ได้ */
+  /** server ยืนยันว่าไม่มีอะไรเปลี่ยน (4xx, หรือ 503 ที่มี code ของแอปเอง) — ลองใหม่ได้ */
   | { kind: "failed"; error: ApiError };
 
 export interface PendingChange {
@@ -78,6 +78,9 @@ export async function refreshPreview(): Promise<void> {
 
 let inflight: Promise<void> | null = null;
 
+/** code ของ 503 ที่ server ของแอปส่งเมื่อยืนยันว่าไม่มีอะไรถูกเปลี่ยน (core.writes / access_guard / routes) */
+export const NO_CHANGE_503 = new Set(["audit_unavailable", "write_failed", "write_unavailable"]);
+
 function classify(error: ApiError, previous: Outcome): Outcome["kind"] {
   if (error.status === 0) return "unknown";
   if (error.status === 409) {
@@ -85,7 +88,9 @@ function classify(error: ApiError, previous: Outcome): Outcome["kind"] {
     return previous.kind === "unknown" ? "unknown" : "conflict";
   }
   if (error.code === "confirm_expired" || error.code === "confirm_invalid") return "expired";
-  if (error.status >= 500 && error.status !== 503) return "unknown";
+  // 503 = "ไม่มีอะไรเปลี่ยน" เฉพาะเมื่อมาจากแอปเอง (code ที่รู้จัก); 503 จาก proxy/uvicorn ไม่รู้ผล
+  if (error.status === 503) return NO_CHANGE_503.has(error.code) ? "failed" : "unknown";
+  if (error.status >= 500) return "unknown";
   return "failed";
 }
 

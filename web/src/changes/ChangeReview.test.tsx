@@ -346,22 +346,53 @@ describe("ChangeReview", () => {
     expect(location).toBe("/changes/review?step=review");
   });
 
-  it("virtualizes diffs over 2,000 lines and renders a current-size diff under 1 second", async () => {
+  // REQ-052 "< 1 วินาที" เป็นเวลาในเบราว์เซอร์จริง — jsdom วัดไม่ได้ จึงตรวจแบบ deterministic:
+  // จำนวนแถวที่สร้างจริงมีขอบเขต (virtualize) ไม่ใช่นาฬิกา (review 2-3 B1)
+  it("virtualizes diffs over 2,000 lines and renders smaller diffs in full", async () => {
     pend(preview({ diff: bigDiff(5000) }));
-    let started = performance.now();
     await render();
     expect(container.querySelectorAll(".diff__row").length).toBeLessThan(200);
     expect(container.querySelector<HTMLInputElement>(".check input")?.disabled).toBe(true);
     expect(text()).toContain("ปิดตัดบรรทัดเมื่อ diff ยาวเกิน 2,000 บรรทัด");
-    expect(performance.now() - started).toBeLessThan(1000);
 
     act(() => root.unmount());
     root = createRoot(container);
     pend(preview({ diff: bigDiff(1500) }));
-    started = performance.now();
     await render();
     expect(container.querySelectorAll(".diff__row").length).toBe(1500);
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(container.querySelector(".diff--virtual")).toBeNull();
+  });
+
+  it("a truncated (too large) diff shows a summary and blocks the next step", async () => {
+    pend(preview({
+      diff: { hunks: [], added: 1048566, removed: 200, truncated: true },
+      errors: [{ code: "diff_too_large", error: "การเปลี่ยนแปลงใหญ่เกินกว่าจะแสดงให้ตรวจได้ — แบ่งแก้เป็นส่วนเล็กลง" }],
+    }));
+    await render();
+    expect(text()).toContain("diff นี้ใหญ่เกินกว่าจะแสดงรายบรรทัด");
+    expect(text()).toContain("+1048566 −200 บรรทัด");
+    expect(container.querySelectorAll(".diff__row").length).toBe(0);
+    expect(button("ถัดไป: ยืนยัน")?.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it.each([
+    [{ code: "audit_unavailable" }, "failed"],
+    [{ code: "write_failed" }, "failed"],
+    [{ code: "write_unavailable" }, "failed"],
+    [null, "unknown"], // 503 จาก proxy/uvicorn ที่ไม่มี envelope ของแอป
+    [{ code: "service_unavailable" }, "unknown"],
+  ])("503 %o is %s", async (body, kind) => {
+    pend(preview({ impact: "normal", confirm_phrase: null }));
+    await render("/changes/review?step=confirm");
+    fetchMock.mockResolvedValueOnce(
+      body
+        ? json(503, { ok: false, ...body, error: "x" })
+        : new Response("<html>503 Service Unavailable</html>", { status: 503, headers: { "Content-Type": "text/html" } }),
+    );
+    await click(button("เขียนไฟล์"));
+    expect(getPending()?.outcome.kind).toBe(kind);
+    if (kind === "unknown") expect(text()).not.toContain("ไม่มีอะไรถูกเปลี่ยน");
+    else expect(text()).toContain("ไม่มีอะไรถูกเปลี่ยน");
   });
 
   it("hold does not start with a non-primary button and a lost pointer cancels it", async () => {

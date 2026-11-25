@@ -100,6 +100,13 @@ export function DiffView({ diff, path, mode, wrap }: DiffViewProps) {
     };
   }, [virtual]);
 
+  if (diff.truncated) {
+    return (
+      <p className="diff__empty" role="note">
+        {th.review.diffTruncated(diff.added, diff.removed)}
+      </p>
+    );
+  }
   if (diff.hunks.length === 0) {
     return <p className="diff__empty">{th.review.noHunks}</p>;
   }
