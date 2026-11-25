@@ -361,6 +361,12 @@ class EditorTrack(BaseModel):
     lockedFields: list[LockedField] = []
 
 
+class FieldOptions(BaseModel):
+    gates: list[GateKind]
+    conditions: list[str]
+    reservedAgents: list[str] = []  # agent สงวนที่ไม่มีไฟล์ใน .claude/agents (เช่น human ของ gate)
+
+
 class FlowEditor(BaseModel):
     project: str
     target: str
@@ -378,6 +384,7 @@ class FlowEditor(BaseModel):
     policyFix: FlowModel | None = None
     overrides: int
     warnings: list[FlowIssue] = []
+    options: FieldOptions
 
 
 class FlowEditorEnvelope(BaseModel):

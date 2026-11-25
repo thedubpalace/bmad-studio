@@ -94,6 +94,10 @@ def test_get_without_overlay_has_lock_metadata(studio: Studio) -> None:
     data = view(studio, "ui-app")
     assert data["base_sha256"] is None and data["exists"] is False and data["overrides"] == 0
     assert data["hasFrontend"] is True and data["issues"] == [] and data["policyFix"] is None
+    # ตัวเลือกของ Inspector มาจาก schema (UI ไม่ hard-code) — story 4-2
+    assert data["options"] == {"gates": ["none", "human", "agent-confirm"],
+                               "conditions": ["requirementsReady", "designReady", "planReady", "hasFrontend"],
+                               "reservedAgents": ["human"]}
     rows = {s["id"]: s for s in data["tracks"]["full"]["stages"]}
     gate = rows["requirements-review"]
     assert gate["locked"] is True and gate["lockReason"] == policy.LOCK_REASON_GATE and gate["mustFollowLocked"] is False

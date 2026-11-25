@@ -107,6 +107,9 @@ export function ProjectFlowPage() {
       <h2 id="flow-project-name" className="flow-head__name mono">
         {name}
       </h2>
+      <Link className="button button--secondary" to={`/p/${encodeURIComponent(name)}/flow`}>
+        <Icon name="flow" size={18} /> {th.flowEditor.editLink}
+      </Link>
       <div className="segmented" role="group" aria-label={th.flow.track}>
         {(["full", "quick"] as const).map((t) => (
           <button key={t} type="button" className="segmented__item" aria-pressed={track === t}

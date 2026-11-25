@@ -170,6 +170,12 @@ export interface ErrorEnvelope {
   details?: unknown | null;
 }
 
+export interface FieldOptions {
+  gates: Array<"none" | "human" | "agent-confirm">;
+  conditions: Array<string>;
+  reservedAgents?: Array<string>;
+}
+
 export interface FlowDraftBody {
   flow: Record<string, unknown>;
 }
@@ -206,6 +212,7 @@ export interface FlowEditor {
   policyFix?: FlowModel | null;
   overrides: number;
   warnings?: Array<FlowIssue>;
+  options: FieldOptions;
 }
 
 export interface FlowEditorEnvelope {

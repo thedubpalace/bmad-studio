@@ -17,7 +17,7 @@ from __future__ import annotations
 import io
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, get_args
 
 from pydantic import ValidationError
 from ruamel.yaml import YAML
@@ -37,7 +37,7 @@ from bmad_studio.core.flow.merge import (
     to_overlay,
 )
 from bmad_studio.core.flow.resolve import topo_order
-from bmad_studio.core.flow.schema import Flow, Overlay, Stage, Track
+from bmad_studio.core.flow.schema import Flow, Gate, Overlay, RegistryFlag, Stage, Track
 from bmad_studio.core.flow.status import find_project
 from bmad_studio.core.flow.validate import Catalog, FlowIssues, find_cycle, issue, needs_plan, parse_flow, schema_issues, validate_flow
 from bmad_studio.core.path_guard import FLOW_PROJECT_RULE, GuardedPath
@@ -53,6 +53,12 @@ MAX_ACKS = 8
 PRESERVE_MAX_BYTES = 64 * 1024
 #: field ของแถวที่เป็น metadata ของ editor (ไม่ใช่ส่วนของ flow) — UI ตัดออกก่อนส่ง draft
 META_KEYS = ("locked", "lockReason", "overridden", "overriddenFields", "default", "mustFollowLocked")
+
+
+def field_options() -> dict[str, list[str]]:
+    """ค่าที่ field เลือกได้ — มาจาก schema (UI ไม่ hard-code รายการ)."""
+    return {"gates": list(get_args(Gate)), "conditions": list(get_args(RegistryFlag)),
+            "reservedAgents": [policy.HUMAN_AGENT]}
 
 
 def project_rel(project: str) -> str:
@@ -303,6 +309,7 @@ def editor_view(paths: VedaPaths, project: str) -> dict[str, Any]:
         "policyFix": fix,
         "overrides": count_overrides(current_overlay),
         "warnings": ux_warnings(flow, has_frontend),
+        "options": field_options(),
     }
 
 

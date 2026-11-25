@@ -6,6 +6,7 @@ import { App } from "./App";
 import { SessionProvider } from "./auth/SessionContext";
 import "./styles/tokens.css";
 import "./styles/app.css";
+import "./styles/flow-editor.css";
 
 const root = document.getElementById("root");
 if (root) {

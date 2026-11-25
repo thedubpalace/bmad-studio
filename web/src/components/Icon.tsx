@@ -19,6 +19,10 @@ const PATHS = {
   skip: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM8 12h8",
   person: "M12 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-6.5 9a6.5 6.5 0 0 1 13 0",
   search: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Zm9 2-4.2-4.2",
+  grip: "M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01",
+  up: "M12 19V5m0 0-6 6m6-6 6 6",
+  down: "M12 5v14m0 0-6-6m6 6 6-6",
+  reset: "M4 4v6h6M4.6 15a8 8 0 1 0 1.9-8.4L4 10",
 } as const;
 
 export type IconName = keyof typeof PATHS;

@@ -9,6 +9,7 @@ import { SessionExpiredModal } from "./components/SessionDialogs";
 import { th } from "./i18n/th";
 import { BmadOverview } from "./pages/BmadOverview";
 import { LoginPage } from "./pages/LoginPage";
+import { ProjectFlowEditorPage } from "./flows/ProjectFlowEditorPage";
 import { ProjectFlowPage } from "./projects/ProjectFlowPage";
 import { ProjectsPage } from "./projects/ProjectsPage";
 
@@ -71,6 +72,14 @@ export function App() {
           element={
             <AppShell title={th.nav.projects}>
               <ProjectFlowPage />
+            </AppShell>
+          }
+        />
+        <Route
+          path="/p/:name/flow"
+          element={
+            <AppShell title={th.nav.projects}>
+              <ProjectFlowEditorPage />
             </AppShell>
           }
         />
