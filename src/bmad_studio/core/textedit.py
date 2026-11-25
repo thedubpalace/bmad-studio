@@ -176,6 +176,18 @@ def _same(a: Any, b: Any) -> bool:
     return isinstance(a, bool) == isinstance(b, bool) and a == b and (a is None) == (b is None)
 
 
+def _same_ids(node: Any, target: Any) -> bool:
+    if not (isinstance(node, list) and isinstance(target, list)) or len(node) != len(target) or not node:
+        return False
+    def ids(items: list) -> list:
+        return [item.get("id") if isinstance(item, Mapping) else _NO_ID for item in items]
+    left, right = ids(node), ids(target)
+    return _NO_ID not in left and left == right
+
+
+_NO_ID = object()
+
+
 def _sync(node: Any, target: Any) -> Any:
     """ทำให้ ``node`` (round-trip) มีค่าเท่า ``target`` โดยแตะเฉพาะส่วนที่ต่าง — คืน node ใหม่ถ้าต้องแทนทั้งก้อน."""
     if isinstance(node, Mapping) and isinstance(target, Mapping):
@@ -183,6 +195,12 @@ def _sync(node: Any, target: Any) -> Any:
             del node[key]
         for key, value in target.items():
             node[key] = _sync(node[key], value) if key in node else value
+        return node
+    if _same_ids(node, target) and not _same(node, target):
+        # รายการ mapping ที่ id ตรงกันทีละตำแหน่ง (เช่น stages ของ flow): แก้ทีละรายการ — comment ของรายการอื่นคงอยู่.
+        # id ไม่ตรง (สลับ/เพิ่ม/ลบ) = แทนทั้งรายการ: comment ไม่ไปติดผิดรายการ (ผู้เรียกเตือนเมื่อ comment หาย)
+        for index, value in enumerate(target):
+            node[index] = _sync(node[index], value)
         return node
     return node if _same(node, target) else target
 

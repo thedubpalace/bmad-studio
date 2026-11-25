@@ -57,7 +57,9 @@ export interface FlowEditorSource {
   title: string;
   backTo: { href: string; label: string };
   /** ข้อความเตือนเพิ่มเหนือ editor (เช่น "กระทบทุกโปรเจกต์ที่ไม่ override") */
-  notice?: ReactNode;
+  notice?: (view: EditorView) => ReactNode;
+  /** ป้ายที่มา (ค่าตั้งต้น: "สืบทอดจาก default · ปรับเอง N จุด") */
+  sourceLabel?: (overrides: number, view: EditorView) => string;
 }
 
 function useMedia(query: string): boolean {
@@ -571,7 +573,7 @@ function ValidationPanel({ check, onGo, compact, open, onToggle, onRetry }: {
                 <span>
                   <strong>{item.sev === "error" ? th.flowEditor.issueError : th.flowEditor.issueWarning}:</strong> {item.error}
                 </span>
-                {item.stage ? (
+                {item.stage && !item.project ? (
                   <button type="button" className="button button--ghost" onClick={() => onGo(item.stage as string, item.track)}>
                     {th.flowEditor.goToStage}
                   </button>
@@ -593,7 +595,7 @@ function ValidationPanel({ check, onGo, compact, open, onToggle, onRetry }: {
   }
   return (
     <section className="validation-bar surface-solid" aria-label={th.flowEditor.validationTitle}>
-      <button type="button" className={`validation-bar__toggle${errors.length ? " validation-bar__toggle--error" : ""}`}
+      <button type="button" className={`validation-bar__toggle${errors.length ? " validation-bar__toggle--error" : warnings.length ? " validation-bar__toggle--warn" : ""}`}
               aria-expanded={open} onClick={onToggle}>
         <Icon name={errors.length ? "cross" : warnings.length ? "alert" : "check"} size={18} />
         <span aria-live="polite">{summary}</span>
@@ -920,7 +922,7 @@ export function FlowEditor({ source }: { source: FlowEditorSource }) {
       <div className="flow-editor__head panel glass">
         <Link className="flow-head__back" to={source.backTo.href}>← {source.backTo.label}</Link>
         <h2 id="flow-editor-title" className="flow-head__name">{source.title}</h2>
-        {source.notice}
+        {source.notice ? source.notice(view) : null}
         <div className="flow-editor__bar">
           <div className="segmented" role="group" aria-label={th.flowEditor.trackLabel}>
             {tracks.map((t) => (
@@ -930,7 +932,7 @@ export function FlowEditor({ source }: { source: FlowEditorSource }) {
               </button>
             ))}
           </div>
-          <p className="flow-editor__source">{th.flowEditor.source(overrides)}</p>
+          <p className="flow-editor__source">{source.sourceLabel ? source.sourceLabel(overrides, view) : th.flowEditor.source(overrides)}</p>
           <button type="button" className="button button--secondary" onClick={() => {
             setPicked(null);
             edit(draftFromFlow(view.defaultFlow));

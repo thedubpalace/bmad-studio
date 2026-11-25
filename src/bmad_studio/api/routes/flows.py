@@ -21,6 +21,7 @@ from bmad_studio.api.schemas import (
     SkillNameListEnvelope,
 )
 from bmad_studio.core.catalog import agent_names, skill_list
+from bmad_studio.core.flow.default_editor import check_default_draft, default_view
 from bmad_studio.core.flow.editor import check_draft, draft_result, editor_view
 from bmad_studio.core.flow.status import find_project
 from bmad_studio.core.paths import VedaPaths
@@ -49,6 +50,17 @@ def _validate(paths: VedaPaths, project: str, draft: dict[str, Any]) -> dict[str
 @router.post("/api/flows/{project}/validate", response_model=FlowDraftCheckEnvelope, responses=FLOW_ERRORS)
 async def validate_draft(request: Request, project: str, body: FlowDraftBody) -> JSONResponse:
     return ok(await run_in_threadpool(_validate, _paths(request), project, body.flow))
+
+
+@router.get("/api/flow-default", response_model=FlowEditorEnvelope, responses=ERRORS)
+async def default_flow_editor(request: Request) -> JSONResponse:
+    """flow เริ่มต้น (story 4-3) — แยก path จาก ``/api/flows/<project>`` เพื่อไม่ชนกับโปรเจกต์ชื่อ default."""
+    return ok(await run_in_threadpool(default_view, _paths(request)))
+
+
+@router.post("/api/flow-default/validate", response_model=FlowDraftCheckEnvelope, responses=ERRORS)
+async def validate_default_draft(request: Request, body: FlowDraftBody) -> JSONResponse:
+    return ok(await run_in_threadpool(check_default_draft, _paths(request), body.flow))
 
 
 @router.get("/api/agents/names", response_model=AgentNameListEnvelope, responses=ERRORS)

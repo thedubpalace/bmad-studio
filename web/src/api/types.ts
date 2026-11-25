@@ -223,6 +223,7 @@ export interface FlowEditorEnvelope {
 export interface FlowIssue {
   code: string;
   error: string;
+  project?: string | null;
   track?: string | null;
   stage?: string | null;
   field?: string | null;

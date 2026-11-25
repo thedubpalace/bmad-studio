@@ -299,8 +299,15 @@ export const th = {
     ackConfirm: "ยืนยันและแก้ต่อ",
     unsaved: "มีการแก้ flow ที่ยังไม่บันทึก",
   },
+  defaultFlow: {
+    title: "Flow เริ่มต้น",
+    impact: "กระทบทุกโปรเจกต์ที่ไม่ override — การบันทึกตรวจ flow ของทุกโปรเจกต์ก่อน โปรเจกต์ที่จะใช้ไม่ได้ทำให้บันทึกไม่ได้",
+    noFile: "ยังไม่มี .veda/flow.default.yaml — แสดง default ที่มากับแอป การบันทึกครั้งแรกจะสร้างไฟล์ผ่านการตรวจการเปลี่ยนแปลง",
+    source: (n: number, exists: boolean) =>
+      `${exists ? ".veda/flow.default.yaml" : "default ที่มากับแอป"} · ${n === 0 ? "เท่ากับ default ของแอป" : `ต่างจาก default ของแอป ${n} จุด`}`,
+    back: "กลับไปที่รายการโปรเจกต์",
+  },
   empty: {
-    defaultFlow: { title: "ยังไม่มีตัวแก้ Flow เริ่มต้น", body: "การแก้ .veda/flow.default.yaml จะอยู่ที่นี่" },
     agents: { title: "ยังไม่มีหน้ารายการ agent", body: "agent ใน .claude/agents จะแสดงที่นี่" },
     bmad: { title: "ยังไม่มีภาพรวม BMAD", body: "เวอร์ชันและ skill ที่ติดตั้งจะแสดงที่นี่" },
     changes: { title: "ยังไม่มีการแก้ไข", body: "ไฟล์ที่แก้ผ่านแอปนี้และสถานะ git จะแสดงที่นี่" },

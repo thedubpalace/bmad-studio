@@ -9,6 +9,7 @@ import { SessionExpiredModal } from "./components/SessionDialogs";
 import { th } from "./i18n/th";
 import { BmadOverview } from "./pages/BmadOverview";
 import { LoginPage } from "./pages/LoginPage";
+import { DefaultFlowEditorPage } from "./flows/DefaultFlowEditorPage";
 import { ProjectFlowEditorPage } from "./flows/ProjectFlowEditorPage";
 import { ProjectFlowPage } from "./projects/ProjectFlowPage";
 import { ProjectsPage } from "./projects/ProjectsPage";
@@ -84,7 +85,14 @@ export function App() {
           }
         />
         <Route path="/p/*" element={<Section title={th.empty.notFound.title} empty={th.empty.notFound} />} />
-        <Route path="/flow/default" element={<Section title={th.nav.defaultFlow} empty={th.empty.defaultFlow} />} />
+        <Route
+          path="/flow/default"
+          element={
+            <AppShell title={th.nav.defaultFlow}>
+              <DefaultFlowEditorPage />
+            </AppShell>
+          }
+        />
         <Route path="/agents/*" element={<Section title={th.nav.agents} empty={th.empty.agents} />} />
         <Route
           path="/bmad"

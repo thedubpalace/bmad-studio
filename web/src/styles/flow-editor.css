@@ -561,6 +561,10 @@
   color: var(--danger);
 }
 
+.validation-bar__toggle--warn {
+  color: var(--warn);
+}
+
 .validation-bar .validation {
   padding: var(--s-2) var(--s-1) var(--s-3);
   max-height: 40vh;

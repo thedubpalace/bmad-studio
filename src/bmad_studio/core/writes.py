@@ -204,13 +204,16 @@ def _whitespace_errors(current: fs.TextDoc, proposed: bytes) -> list[dict[str, s
 class WritePipeline:
     def __init__(self, guard: PathGuard, state: RuntimeState, secret: str,
                  kinds: Mapping[str, KindHandler], *, clock: Callable[[], float] = time.time,
-                 max_bytes: int = fs.MAX_BYTES, validators: Mapping[str, FileValidator] | None = None) -> None:
+                 max_bytes: int = fs.MAX_BYTES, validators: Mapping[str, FileValidator] | None = None,
+                 delete_validators: Mapping[str, Callable[[], list[dict[str, str]]]] | None = None) -> None:
         if len(secret) < 32:
             raise ValueError("secret ต้องยาวอย่างน้อย 32 ตัวอักษร")
         self.guard = guard
         self.state = state
         self.kinds = dict(kinds)
         self.validators = dict(validators or {})
+        #: ตรวจการลบต่อ rule (เช่น ลบ flow เริ่มต้น = กลับไปใช้ packaged default ต้องตรวจทุกโปรเจกต์ — AD-7)
+        self.delete_validators = dict(delete_validators or {})
         self.clock = clock
         self.max_bytes = max_bytes
         self._key = hmac.new(secret.encode(), _TOKEN_CONTEXT, hashlib.sha256).digest()
@@ -293,6 +296,8 @@ class WritePipeline:
             errors.extend(_whitespace_errors(current, proposal.proposed))
         if not delete:
             errors.extend(self._validate(guarded.rule, proposal.proposed))
+        elif guarded.rule in self.delete_validators:
+            errors.extend(self.delete_validators[guarded.rule]())
         try:
             diff = unified(current.text, "" if delete else fs.decode(proposal.proposed).text)
         except StudioError:  # ผลลัพธ์ไม่ใช่ข้อความ — ไม่แสดง diff ที่ทำให้เข้าใจผิด
@@ -372,13 +377,16 @@ class WritePipeline:
                                   {"current_sha256": _sha(original)})
             if not os.path.isdir(os.path.dirname(os.fspath(guarded.path))):
                 raise StudioError("parent_missing", "ไม่มีโฟลเดอร์ปลายทาง", 422)
+            # ตรวจซ้ำใต้ lock: default/catalog/overlay ของโปรเจกต์อาจเปลี่ยนระหว่าง preview กับ commit (TTL 10 นาที).
+            # การลบตรวจด้วย delete validator ของ rule (ลบ flow เริ่มต้น); ลบ overlay = กลับไปใช้ default ที่ตรวจแล้ว
             if not delete:
-                # ตรวจซ้ำใต้ lock: default/catalog อาจเปลี่ยนระหว่าง preview กับ commit (TTL 10 นาที).
-                # การลบ (ย้ายไป backup) ไม่ตรวจ: ไม่มี bytes ใหม่ — ลบ overlay = กลับไปใช้ default ซึ่ง resolver ตรวจทุกครั้ง
                 late = self._validate(guarded.rule, proposed)
-                if late:
-                    raise StudioError("has_errors", "ไฟล์นี้ไม่ผ่านการตรวจแล้ว (มีการเปลี่ยนแปลงหลังตัวอย่าง) — เปิดตัวอย่างใหม่",
-                                      422, {"errors": late})
+            else:
+                check = self.delete_validators.get(guarded.rule)
+                late = list(check()) if check is not None else []
+            if late:
+                raise StudioError("has_errors", "ไฟล์นี้ไม่ผ่านการตรวจแล้ว (มีการเปลี่ยนแปลงหลังตัวอย่าง) — เปิดตัวอย่างใหม่",
+                                  422, {"errors": late})
             change_id = uuid.uuid4().hex
             now = self.clock()
             record = {

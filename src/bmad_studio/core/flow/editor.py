@@ -234,6 +234,23 @@ def policy_fix(flow: Flow, default: Flow, issues: FlowIssues, catalog: Catalog |
 
 # -- มุมมองทั้งหน้า ------------------------------------------------------------------------------
 
+def disk_state(path: Any, raw: bytes | None, load_error: bool, label: str) -> tuple[bytes | None, bool, str | None]:
+    """(bytes ตามที่ pipeline อ่าน, แก้ผ่านแอปได้ไหม, เหตุผล) — base_sha256 ต้องมาจาก bytes ชุดนี้ ไม่ใช่จาก loader
+    ของ flow ที่จำกัด 256 KiB: ไฟล์ที่ใหญ่/เสียยังแทนที่ได้; ไฟล์ที่ไม่ใช่ข้อความ = ต้องแก้มือ."""
+    disk = raw
+    if load_error and raw is None:
+        try:
+            disk = fs.read_bytes(path)
+        except (StudioError, OSError):
+            return None, False, f"อ่านไฟล์ {label}ไม่ได้ (ใหญ่เกิน 2 MiB หรือไม่ใช่ไฟล์) — แก้ด้วยมือ"
+    if disk is not None:
+        try:
+            fs.decode(disk)
+        except StudioError:
+            return disk, False, f"ไฟล์ {label}ไม่ใช่ข้อความ UTF-8/UTF-16 — แก้ด้วยมือ"
+    return disk, True, None
+
+
 def editor_view(paths: VedaPaths, project: str) -> dict[str, Any]:
     entry = find_project(paths, project)
     name = str(entry["name"])
@@ -274,21 +291,7 @@ def editor_view(paths: VedaPaths, project: str) -> dict[str, Any]:
         current_overlay: dict[str, Any] | None = to_overlay(flow, default)
     except FlowInvalid:
         current_overlay = None
-    # base_sha256 = sha ของไฟล์ตามที่ pipeline อ่าน (ไม่ใช่ตาม loader ของ flow ที่จำกัด 256 KiB) — ไฟล์ที่ใหญ่/เสีย
-    # ยังแทนที่ได้ผ่าน editor; ไฟล์ที่ pipeline อ่านเป็นข้อความไม่ได้ = แก้ผ่านแอปไม่ได้ (ต้องแก้มือ)
-    editable, reason = True, None
-    disk = raw
-    if load_error and raw is None:
-        try:
-            disk = fs.read_bytes(overlay_path(paths, name))
-        except (StudioError, OSError):
-            disk = None
-            editable, reason = False, "อ่านไฟล์ flow ของโปรเจกต์นี้ไม่ได้ (ใหญ่เกิน 2 MiB หรือไม่ใช่ไฟล์) — แก้ด้วยมือ"
-    if disk is not None:
-        try:
-            fs.decode(disk)
-        except StudioError:
-            editable, reason = False, "ไฟล์ flow ของโปรเจกต์นี้ไม่ใช่ข้อความ UTF-8/UTF-16 — แก้ด้วยมือ"
+    disk, editable, reason = disk_state(overlay_path(paths, name), raw, load_error, "flow ของโปรเจกต์นี้")
     if not editable:
         fix = None
     has_frontend = has_frontend_of(entry)
@@ -346,8 +349,25 @@ def _same_overlay(text: str, overlay: Mapping[str, Any]) -> bool:
     return parsed is not None and not issues and parsed == Overlay.model_validate(dict(overlay))
 
 
-def _comment_lines(text: str) -> list[str]:
-    return [line.strip() for line in text.splitlines() if line.strip().startswith("#")]
+def comment_lines(text: str) -> list[str]:
+    """comment ทุกตัวในไฟล์ (ทั้งบรรทัดเต็มและท้ายบรรทัด) — ใช้นับว่าการแก้ทำ comment หายไหม.
+
+    นับแบบหยาบ: ``#`` ที่ต้นบรรทัดหรือหลังช่องว่าง (slug/ค่าใน flow ไม่มี ``#``) — นับซ้ำได้ (Counter).
+    """
+    out = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            out.append(stripped)
+        elif " #" in line:
+            out.append(line[line.index(" #") + 1:].strip())
+    return out
+
+
+def lost_comments(before: str, after: str) -> int:
+    from collections import Counter
+
+    return sum((Counter(comment_lines(before)) - Counter(comment_lines(after))).values())
 
 
 def render_overlay(overlay: Mapping[str, Any], current: fs.TextDoc, project: str) -> tuple[str, FlowIssues]:
@@ -362,10 +382,9 @@ def render_overlay(overlay: Mapping[str, Any], current: fs.TextDoc, project: str
         except StudioError:
             text = None
         if text is not None and _same_overlay(text, overlay):
-            kept = _comment_lines(text)
-            lost = [c for c in _comment_lines(current.text) if c not in kept]
+            lost = lost_comments(current.text, text)
             if lost:
-                warnings.append(issue("comments_dropped", f"comment ในไฟล์เดิม {len(lost)} บรรทัดจะหายไปกับขั้นที่คืนค่า default"
+                warnings.append(issue("comments_dropped", f"comment ในไฟล์เดิม {lost} บรรทัดจะหายไปกับขั้นที่คืนค่า default"
                                                           " — ตรวจใน diff ก่อนบันทึก"))
             return text, warnings
     text = _fresh(overlay, project)

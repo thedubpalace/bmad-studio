@@ -21,6 +21,8 @@ MAY_NAME_REGISTRY = {
     SRC / "core" / "flow" / "resolve.py",
     # story 4-1: flow editor อ่าน hasFrontend/ชื่อโปรเจกต์ผ่าน status.find_project (อ่านอย่างเดียว)
     SRC / "core" / "flow" / "editor.py",
+    # story 4-3: ตรวจ overlay ทุกโปรเจกต์เมื่อ default เปลี่ยน (อ่านรายชื่อจาก read_registry อย่างเดียว)
+    SRC / "core" / "flow" / "default_editor.py",
 }
 WRITE_CALLS = {
     "open", "write_text", "write_bytes", "write", "replace", "rename", "dump", "touch", "unlink",

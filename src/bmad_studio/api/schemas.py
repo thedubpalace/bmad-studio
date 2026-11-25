@@ -191,6 +191,7 @@ GateKind = Literal["none", "human", "agent-confirm"]
 class FlowIssue(BaseModel):
     code: str
     error: str
+    project: str | None = None  # ตรวจข้ามโปรเจกต์ของ flow เริ่มต้น (story 4-3)
     track: str | None = None
     stage: str | None = None
     field: str | None = None
