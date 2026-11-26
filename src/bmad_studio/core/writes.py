@@ -7,7 +7,8 @@
 **commit** (:meth:`WritePipeline.commit`)
     ตรวจ token (HMAC ผูก preview_id, path, base, proposed, session, expiry) → ผลเดิมถ้า commit แล้ว →
     errors ว่าง → typed confirmation (impact high) → ใต้ lock ของ path: guard ซ้ำ, sha ของไฟล์ปัจจุบัน
-    ต้องเท่า base (ไม่งั้น 409) → audit → backup bytes → temp + ``os.replace`` → changelog
+    ต้องเท่า base (ไม่งั้น 409) → validator ซ้ำ → ชุดโปรเจกต์ของคำเตือนที่ต้องยืนยันต้องไม่โตเกินที่แสดงใน preview
+    (ไม่งั้น 409 ``ux_ack_stale``) → audit → backup bytes → temp + ``os.replace`` → changelog
 
 ไม่ import FastAPI: API ส่ง ``session_fp`` และ callback ``audit`` เข้ามา.
 """
@@ -226,7 +227,8 @@ class WritePipeline:
     # -- token ---------------------------------------------------------------
     def _sign(self, meta: Mapping[str, Any], session_fp: str, expiry: int) -> str:
         """ลายเซ็นผูกทุกอย่างที่ commit ใช้ตัดสิน — แก้ไฟล์ preview บนดิสก์แล้ว token ใช้ไม่ได้."""
-        issues = json.dumps([meta["errors"], meta["warnings"], meta.get("extra", {})], sort_keys=True, ensure_ascii=True)
+        issues = json.dumps([meta["errors"], meta["warnings"], meta.get("extra", {}), meta.get("ack_scope", [])],
+                            sort_keys=True, ensure_ascii=True)
         message = "|".join([
             meta["preview_id"], meta["rel"], meta["base_sha256"] or "-", meta["proposed_sha256"] or "-", session_fp,
             str(expiry), meta["kind"], meta["op"], meta["impact"], meta["confirm_phrase"],
@@ -263,6 +265,12 @@ class WritePipeline:
         if rule in VALIDATED_RULES:
             return [{"code": "validator_missing", "error": "ตรวจไฟล์นี้ไม่ได้ จึงบันทึกไม่ได้"}]
         return []
+
+    @staticmethod
+    def _ack_scope(advice: list[dict[str, str]]) -> list[str]:
+        from bmad_studio.core.flow.ux_guard import ack_scope
+
+        return ack_scope(advice)
 
     def _lock(self, path: GuardedPath) -> threading.Lock:
         # ไฟล์ flow ทุกไฟล์ใช้ lock เดียว: overlay ถูกตรวจกับ default ปัจจุบัน — default ต้องไม่เปลี่ยนระหว่างตรวจกับเขียน
@@ -330,6 +338,8 @@ class WritePipeline:
             "extra": proposal.extra,
             "impact": impact_for(guarded.rule), "confirm_phrase": confirm_phrase(guarded),
             "errors": errors, "warnings": warnings, "added": diff["added"], "removed": diff["removed"],
+            # ชุดโปรเจกต์ที่คำเตือน ux ใน preview นี้แสดง — การยืนยันครอบคลุมเฉพาะชุดนี้ (retro epic-4 A3)
+            "ack_scope": self._ack_scope(advice) if advisory is not None else [],
             "expiry": expiry, "actor": actor, "created_at": utc_iso(now),
         }
         if self.state.count_previews() >= MAX_PREVIEWS:  # ตรวจซ้ำหลังงานแพง (คำขอพร้อมกัน)
@@ -390,13 +400,20 @@ class WritePipeline:
                 check = self.delete_validators.get(guarded.rule)
                 late = list(check()) if check is not None else []
             extra = meta.get("extra") or {}
-            if not late and "acknowledged" in extra and guarded.rule in self.advisories:
-                # kind ที่ต้องยืนยัน (flow/flow-default): default/overlay/registry อาจเปลี่ยนหลัง preview จนปิด ux
-                # ของโปรเจกต์ที่ผู้ใช้ไม่ได้ยืนยัน — ตรวจซ้ำใต้ lock เหมือน validator
-                from bmad_studio.core.flow.ux_guard import ack_errors
+            if not late and guarded.rule in self.advisories:
+                # ทุก kind/op ของ rule ที่มีคำเตือน (flow, flow-default, revert, ลบ): default/overlay/registry อาจเปลี่ยน
+                # หลัง preview จนปิด ux ของโปรเจกต์ที่ผู้ใช้ไม่ได้เห็น — ตรวจซ้ำใต้ lock เหมือน validator
+                from bmad_studio.core.flow.ux_guard import ack_errors, scope_grew
 
                 advice = self.advisories[guarded.rule](guarded.rel, None if delete else proposed)
-                late = ack_errors(advice, list(extra.get("acknowledged") or []))
+                grown = scope_grew(list(meta.get("ack_scope") or []), self._ack_scope(advice))
+                if grown:
+                    raise StudioError(
+                        "ux_ack_stale",
+                        "รายชื่อโปรเจกต์ที่การแก้นี้จะปิดขั้นออกแบบ UI เปลี่ยนไปหลังตัวอย่าง — ไม่มีอะไรถูกเขียน "
+                        "เปิดตัวอย่างใหม่แล้วยืนยันอีกครั้ง", 409, {"projects": grown})
+                if "acknowledged" in extra:
+                    late = ack_errors(advice, list(extra.get("acknowledged") or []))
             if late:
                 raise StudioError("has_errors", "ไฟล์นี้ไม่ผ่านการตรวจแล้ว (มีการเปลี่ยนแปลงหลังตัวอย่าง) — เปิดตัวอย่างใหม่",
                                   422, {"errors": late})

@@ -305,6 +305,13 @@ function ConfirmStep({ pending, onBack }: { pending: PendingChange; onBack: () =
   );
 }
 
+/** ชื่อโปรเจกต์จาก details ของ ux_ack_stale (ข้อมูลจาก server — แสดงเป็นข้อความเท่านั้น) */
+function staleProjects(details: unknown): string[] {
+  if (!details || typeof details !== "object") return [];
+  const value = (details as { projects?: unknown }).projects;
+  return Array.isArray(value) ? value.filter((p): p is string => typeof p === "string" && p !== "*unchecked*").slice(0, 50) : [];
+}
+
 function RefreshButton() {
   const [, setParams] = useSearchParams();
   const [busy, setBusy] = useState(false);
@@ -409,6 +416,20 @@ function Outcome({ pending }: { pending: PendingChange }) {
       </div>
     );
   }
+  if (outcome.kind === "reask") {
+    const projects = staleProjects(outcome.error.details);
+    return (
+      <div className="banner banner--warn" role="alert">
+        <Icon name="alert" />
+        <div>
+          <p className="banner__title">{th.review.reaskTitle}</p>
+          <p>{th.review.reaskBody}</p>
+          {projects.length > 0 ? <p>{th.review.reaskProjects(projects)}</p> : null}
+        </div>
+        <RefreshButton />
+      </div>
+    );
+  }
   if (outcome.kind === "unknown") {
     return (
       <div className="banner banner--danger" role="alert">
@@ -446,7 +467,8 @@ export function ChangeReview() {
   const blocked = (pending?.preview.errors ?? []).length > 0;
   const step = requested === "confirm" && !blocked ? "confirm" : "review";
   const outcome = pending?.outcome.kind ?? "idle";
-  const settled = outcome === "done" || outcome === "conflict" || outcome === "expired" || outcome === "unknown";
+  const settled =
+    outcome === "done" || outcome === "conflict" || outcome === "expired" || outcome === "reask" || outcome === "unknown";
   // ไม่ย้าย focus ตอนเริ่มเขียน (ผู้ใช้ยังอยู่ที่ปุ่ม) — ย้ายเมื่อเปลี่ยนขั้นหรือได้ผล
   const focusKey = outcome === "writing" ? "idle" : outcome;
 

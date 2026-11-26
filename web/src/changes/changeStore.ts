@@ -11,6 +11,8 @@ export type Outcome =
   | { kind: "done"; result: ChangeCommit }
   | { kind: "conflict"; error: ApiError }
   | { kind: "expired"; error: ApiError }
+  /** ชุดโปรเจกต์ที่การยืนยันครอบคลุมเปลี่ยนหลัง preview (ux_ack_stale) — ไม่มีอะไรถูกเขียน ต้องเปิดตัวอย่างใหม่ */
+  | { kind: "reask"; error: ApiError }
   /** ไม่รู้ว่าเขียนไปแล้วหรือยัง (เครือข่ายขาดหลังส่ง, 5xx ที่ไม่ใช่ 503) — ให้ไปดูที่ /changes */
   | { kind: "unknown"; error: ApiError }
   /** server ยืนยันว่าไม่มีอะไรเปลี่ยน (4xx, หรือ 503 ที่มี code ของแอปเอง) — ลองใหม่ได้ */
@@ -83,6 +85,8 @@ export const NO_CHANGE_503 = new Set(["audit_unavailable", "write_failed", "writ
 
 function classify(error: ApiError, previous: Outcome): Outcome["kind"] {
   if (error.status === 0) return "unknown";
+  // ตรวจหลังยืนยันว่า base ตรง (ไม่ใช่การเขียนของเราเอง) — ถามใหม่ทุกกรณี (retro epic-4 A3)
+  if (error.status === 409 && error.code === "ux_ack_stale") return "reask";
   if (error.status === 409) {
     // ส่งซ้ำหลังเครือข่ายขาด: 409 อาจเป็นเพราะการเขียนครั้งก่อนของเราเอง
     return previous.kind === "unknown" ? "unknown" : "conflict";

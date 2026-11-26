@@ -13,6 +13,11 @@ revert / ลบ ``.veda/flow.default.yaml``  ทุกโปรเจกต์�
 
 pipeline เรียก :func:`advisories` กับทุก kind (ผล = ``warnings[]``); kind ``flow``/``flow-default`` เรียกฟังก์ชันเดียวกัน
 เพื่อตัดสินว่าต้องมี ack ไหม — ข้อความจึงตรงกันและ pipeline ตัดรายการซ้ำได้.
+
+การยืนยัน (ack ของ flow/flow-default และ typed confirmation ของ revert/ลบ) ผูกกับ **ชุดโปรเจกต์ที่แสดงใน preview**
+(:func:`ack_scope` เก็บใน metadata ของ preview ที่ลงลายเซ็น) — ตอน commit pipeline คำนวณชุดใหม่ใต้ lock ถ้ามีโปรเจกต์
+ที่ไม่ได้แสดง (เช่น เพิ่มเข้าทะเบียนโปรเจกต์ หรือ hasFrontend เปลี่ยนหลัง preview) = 409 ``ux_ack_stale`` ต้องเปิด preview ใหม่
+(retro epic-4 A3; ครอบคลุม flow, flow-default, revert, ลบ).
 "ปิด" นิยามที่ :func:`bmad_studio.core.flow.editor.ux_warnings` (รวม ``optional: true`` — review 4-1 N2).
 """
 from __future__ import annotations
@@ -129,6 +134,24 @@ def safe(advisory: Advisory) -> Advisory:
     return run
 
 
+#: ค่าใน :func:`ack_scope` แทน "ตรวจไม่ได้" — ไม่ใช่ชื่อโปรเจกต์ที่ถูกต้อง (ชื่อโปรเจกต์ห้ามมี ``*``)
+SCOPE_UNCHECKED = "*unchecked*"
+
+
+def ack_scope(warnings: FlowIssues) -> list[str]:
+    """ชุดโปรเจกต์ที่การยืนยันครอบคลุม (เรียง, ไม่ซ้ำ): ชื่อจากคำเตือน ux + :data:`SCOPE_UNCHECKED` ถ้าตรวจไม่ได้."""
+    names = {str(w["project"]) for w in warnings if w.get("code") == ACK_UX and w.get("project")}
+    if any(w.get("code") == ACK_UX and not w.get("project") for w in warnings) or any(
+            w.get("code") == "ux_check_failed" for w in warnings):
+        names.add(SCOPE_UNCHECKED)
+    return sorted(names)
+
+
+def scope_grew(shown: list[str], now: list[str]) -> list[str]:
+    """โปรเจกต์ที่ ux จะปิดตอนนี้แต่ไม่ได้แสดงใน preview (ว่าง = การยืนยันเดิมยังครอบคลุม)."""
+    return sorted(set(now) - set(shown))
+
+
 def ack_errors(warnings: FlowIssues, acknowledged: list[str]) -> FlowIssues:
     """kind ที่ผู้ใช้แก้เอง (flow / flow-default): คำเตือน ux ต้องยืนยันใน ``payload.acknowledged``."""
     if any(w["code"] == ACK_UX for w in warnings) and ACK_UX not in acknowledged:
@@ -145,4 +168,5 @@ def parse_acknowledged(payload: Any, allowed: frozenset[str], limit: int) -> lis
     return value
 
 
-__all__ = ["ack_errors", "advisories", "default_ux", "parse_acknowledged", "project_ux"]
+__all__ = ["SCOPE_UNCHECKED", "ack_errors", "ack_scope", "advisories", "default_ux", "parse_acknowledged",
+           "project_ux", "scope_grew"]

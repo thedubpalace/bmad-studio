@@ -228,8 +228,9 @@ def test_commit_rechecks_ux_ack_under_lock(studio: Studio) -> None:
     assert data["errors"] == [] and data["warnings"] == []
     (root / DEFAULT).write_bytes(_default_without_ux())
     response = studio.commit(data, typed="flow.yaml")
-    assert response.status_code == 422 and not (root / ".veda/projects/ui/flow.yaml").exists()
-    assert "ux_disable_unconfirmed" in {e["code"] for e in response.json()["details"]["errors"]}
+    # ชุดโปรเจกต์ที่ ux ปิดโตจาก {} เป็น {ui} หลัง preview → ต้องถามใหม่ (retro epic-4 A3) ไม่เขียน
+    assert response.status_code == 409 and not (root / ".veda/projects/ui/flow.yaml").exists()
+    assert response.json()["code"] == "ux_ack_stale" and response.json()["details"]["projects"] == ["ui"]
 
 
 def test_default_draft_without_overlay_is_no_change_even_when_ux_is_off(studio: Studio) -> None:
@@ -249,3 +250,171 @@ def test_overlay_parse_cache_is_bounded_and_copies_the_overlay() -> None:
     a.tracks["full"].stages.clear()  # ผู้เรียกแก้ผลได้ — ต้องไม่กระทบครั้งถัดไป
     b = merge.parse_overlay(b"extends: default\ntracks: {full: {stages: {devops: {enabled: false}}}}\n")[0]
     assert "devops" in b.tracks["full"].stages
+
+
+# -- ack ผูกกับชุดโปรเจกต์ที่แสดงใน preview (retro epic-4 A3) -------------------------------------------
+
+def _registry_edit(studio: Studio, change: Any) -> None:
+    import json
+
+    path = studio.settings.veda_root / ".veda/projects/registry.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    change(data["projects"])
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def _add_project(studio: Studio, entry: dict[str, Any]) -> None:
+    _registry_edit(studio, lambda projects: projects.append(entry))
+    project_dir(studio.settings.veda_root, entry["name"]).mkdir(exist_ok=True)
+
+
+def _set_flag(studio: Studio, name: str, **flags: Any) -> None:
+    _registry_edit(studio, lambda projects: [p.update(flags) for p in projects if p["name"] == name])
+
+
+NEW_UI = {"name": "late-ui", "status": "developing", "requirementsReady": True, "hasFrontend": True}
+UX_OFF_OVERLAY = "extends: default\ntracks:\n  full:\n    stages:\n      ux-design: {enabled: false}\n"
+UX_ON_OVERLAY = "extends: default\ntracks:\n  full:\n    stages:\n      ux-design: {enabled: true}\n"
+
+
+def _stale(response: Any, projects: list[str]) -> None:
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert body["code"] == "ux_ack_stale" and body["details"]["projects"] == projects
+
+
+def _ux_off_default_draft(studio: Studio) -> dict[str, Any]:
+    draft = strip(studio.client.get("/api/flow-default").json()["data"])
+    stage(draft, "ux-design")["enabled"] = False
+    return draft
+
+
+def test_flow_default_ack_does_not_cover_project_added_after_preview(studio: Studio) -> None:
+    root = studio.settings.veda_root
+    draft = _ux_off_default_draft(studio)
+    data = preview(studio, "flow-default", DEFAULT, {"flow": draft, "acknowledged": [UX]}, None)
+    assert data["errors"] == [] and ux_projects(data["warnings"]) == {"ui", "nofe"}
+    _add_project(studio, NEW_UI)
+    _stale(studio.commit(data, typed="flow.default.yaml"), ["late-ui"])
+    assert not (root / DEFAULT).exists() and studio.changes() == []
+    again = preview(studio, "flow-default", DEFAULT, {"flow": draft, "acknowledged": [UX]}, None)
+    assert ux_projects(again["warnings"]) == {"ui", "nofe", "late-ui"}  # ถามใหม่พร้อมชื่อที่เพิ่ม
+    assert studio.commit(again, typed="flow.default.yaml").status_code == 200
+
+
+def test_flow_default_commit_allowed_when_shown_set_shrinks(studio: Studio) -> None:
+    data = preview(studio, "flow-default", DEFAULT, {"flow": _ux_off_default_draft(studio), "acknowledged": [UX]}, None)
+    _set_flag(studio, "nofe", hasFrontend=False)  # ชุดเล็กลง — การยืนยันเดิมยังครอบคลุม
+    assert studio.commit(data, typed="flow.default.yaml").status_code == 200
+
+
+def test_flow_default_unchanged_set_commits(studio: Studio) -> None:
+    data = preview(studio, "flow-default", DEFAULT, {"flow": _ux_off_default_draft(studio), "acknowledged": [UX]}, None)
+    _add_project(studio, {**NEW_UI, "name": "late-cli", "hasFrontend": False})  # ไม่มี frontend — ชุดไม่เปลี่ยน
+    assert studio.commit(data, typed="flow.default.yaml").status_code == 200
+
+
+def test_flow_overlay_frontend_flag_flip_after_preview_reasks(studio: Studio) -> None:
+    root = studio.settings.veda_root
+    draft = strip(studio.client.get("/api/flows/cli").json()["data"])
+    stage(draft, "ux-design")["enabled"] = False
+    data = preview(studio, "flow", ".veda/projects/cli/flow.yaml", {"flow": draft}, None)
+    assert data["errors"] == [] and data["warnings"] == []
+    _set_flag(studio, "cli", hasFrontend=True)
+    _stale(studio.commit(data, typed="flow.yaml"), ["cli"])
+    assert not (root / ".veda/projects/cli/flow.yaml").exists()
+
+
+def test_flow_overlay_delete_frontend_flag_flip_after_preview_reasks(studio: Studio) -> None:
+    root = studio.settings.veda_root
+    (root / DEFAULT).write_bytes(_default_without_ux())
+    overlay = root / ".veda/projects/cli/flow.yaml"
+    overlay.write_text(UX_ON_OVERLAY, encoding="utf-8")
+    view = studio.client.get("/api/flows/cli").json()["data"]
+    data = preview(studio, "flow", ".veda/projects/cli/flow.yaml", {"flow": view["defaultFlow"]}, file_sha(overlay))
+    assert data["op"] == "delete" and data["errors"] == [] and data["warnings"] == []
+    _set_flag(studio, "cli", hasFrontend=True)
+    _stale(studio.commit(data, typed="flow.yaml"), ["cli"])
+    assert overlay.exists()
+
+
+def test_revert_of_default_does_not_cover_project_added_after_preview(studio: Studio) -> None:
+    target = studio.settings.veda_root / DEFAULT
+    off = _default_without_ux()
+    target.write_bytes(off)
+    draft = strip(studio.client.get("/api/flow-default").json()["data"])
+    stage(draft, "ux-design")["enabled"] = True
+    stage(draft, "devops")["optional"] = False
+    entry = studio.commit(preview(studio, "flow-default", DEFAULT, {"flow": draft}, sha(off)),
+                          typed="flow.default.yaml").json()["data"]
+    before = file_sha(target)
+    revert = preview(studio, "revert", DEFAULT, {"change_id": entry["change_id"]}, before)
+    assert ux_projects(revert["warnings"]) == {"ui", "nofe"}
+    _add_project(studio, NEW_UI)
+    _stale(studio.commit(revert, typed="flow.default.yaml"), ["late-ui"])
+    assert file_sha(target) == before
+
+
+def test_reset_default_delete_does_not_cover_project_added_after_preview(studio: Studio) -> None:
+    """รีเซ็ต default = ลบไฟล์ (กลับไปใช้ packaged); default ปัจจุบันมีขั้นออกแบบสำรอง (ui-design) — โปรเจกต์ที่เพิ่ม
+    หลัง preview และปิด ux-design ใน overlay จะเสีย ux หลังลบ."""
+    root = studio.settings.veda_root
+    target = root / DEFAULT
+    data = default_data()
+    data["tracks"]["full"]["stages"].append({"id": "ui-design", "agent": "ux-designer", "enabled": True,
+                                             "optional": False, "after": ["requirements-review"], "gate": "none",
+                                             "produces": ["designReady"]})
+    stage(data, "architecture")["after"] = ["ux-design", "ui-design"]
+    raw = dump(data).encode()
+    target.write_bytes(raw)
+    reset_draft = studio.client.get("/api/flow-default").json()["data"]["defaultFlow"]
+    reset = preview(studio, "flow-default", DEFAULT, {"flow": reset_draft, "acknowledged": [UX]}, sha(raw))
+    assert reset["op"] == "delete" and "ui-off" in ux_projects(reset["warnings"])
+    _add_project(studio, {**NEW_UI, "name": "late-off"})
+    (project_dir(root, "late-off") / "flow.yaml").write_text(UX_OFF_OVERLAY, encoding="utf-8")
+    _stale(studio.commit(reset, typed="flow.default.yaml"), ["late-off"])
+    assert target.read_bytes() == raw
+
+
+def test_revert_of_overlay_frontend_flag_flip_after_preview_reasks(studio: Studio) -> None:
+    root = studio.settings.veda_root
+    overlay = root / ".veda/projects/cli/flow.yaml"
+    off = strip(studio.client.get("/api/flows/cli").json()["data"])
+    stage(off, "ux-design")["enabled"] = False
+    assert studio.commit(preview(studio, "flow", ".veda/projects/cli/flow.yaml", {"flow": off}, None),
+                         typed="flow.yaml").status_code == 200
+    on = strip(studio.client.get("/api/flows/cli").json()["data"])
+    stage(on, "ux-design")["enabled"] = True
+    second = studio.commit(preview(studio, "flow", ".veda/projects/cli/flow.yaml", {"flow": on}, file_sha(overlay)),
+                           typed="flow.yaml").json()["data"]
+    revert = preview(studio, "revert", ".veda/projects/cli/flow.yaml", {"change_id": second["change_id"]}, None)
+    assert revert["op"] == "create" and revert["warnings"] == []
+    _set_flag(studio, "cli", hasFrontend=True)
+    _stale(studio.commit(revert, typed="flow.yaml"), ["cli"])
+    assert not overlay.exists()
+
+
+def test_ack_scope_is_signed(studio: Studio) -> None:
+    """แก้ ack_scope ในไฟล์ preview บนดิสก์ให้ครอบคลุมโปรเจกต์ใหม่ไม่ได้ — token ใช้ไม่ได้."""
+    import json
+
+    data = preview(studio, "flow-default", DEFAULT, {"flow": _ux_off_default_draft(studio), "acknowledged": [UX]}, None)
+    meta_path = studio.settings.runtime_dir / "previews" / f"{data['preview_id']}.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["ack_scope"] == ["nofe", "ui"]
+    meta["ack_scope"].append("late-ui")
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    _add_project(studio, NEW_UI)
+    response = studio.commit(data, typed="flow.default.yaml")
+    assert response.status_code == 403 and response.json()["code"] == "confirm_invalid"
+
+
+def test_ack_scope_unit() -> None:
+    from bmad_studio.core.flow.ux_guard import SCOPE_UNCHECKED, ack_scope, scope_grew
+
+    shown = ack_scope([{"code": UX, "project": "b", "error": ""}, {"code": UX, "project": "a", "error": ""},
+                       {"code": "other", "project": "z", "error": ""}])
+    assert shown == ["a", "b"]
+    assert ack_scope([{"code": "ux_check_failed", "error": ""}]) == [SCOPE_UNCHECKED]
+    assert scope_grew(shown, ["a"]) == [] and scope_grew(shown, ["a", "c"]) == ["c"]
+    assert scope_grew([], [SCOPE_UNCHECKED]) == [SCOPE_UNCHECKED]

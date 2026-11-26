@@ -346,6 +346,25 @@ describe("ChangeReview", () => {
     expect(location).toBe("/changes/review?step=review");
   });
 
+  it("ux_ack_stale asks again: names the added projects and reopens the preview (retro epic-4 A3)", async () => {
+    pend(preview({ impact: "normal", confirm_phrase: null }));
+    await render("/changes/review?step=confirm");
+    fetchMock
+      .mockResolvedValueOnce(json(409, { ok: false, code: "ux_ack_stale", error: "เปลี่ยน",
+        details: { projects: ["late-ui", "<b>x</b>", "*unchecked*"] } }))
+      .mockResolvedValueOnce(json(200, { ok: true, data: preview({ preview_id: "e".repeat(32), impact: "normal", confirm_phrase: null }) }));
+    await click(button("เขียนไฟล์"));
+    expect(text()).toContain("รายชื่อโปรเจกต์ที่จะถูกปิดขั้นออกแบบ UI เปลี่ยนไปหลังตัวอย่าง");
+    expect(text()).toContain("โปรเจกต์ที่เพิ่มมา: late-ui, <b>x</b>");
+    expect(text()).not.toContain("*unchecked*");
+    expect(container.querySelector("b")).toBeNull();
+    expect(text()).not.toContain("ไฟล์ถูกแก้จากภายนอก");
+    await click(button("เปิดตัวอย่างใหม่"));
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/changes/preview");
+    expect(getPending()?.preview.preview_id).toBe("e".repeat(32));
+    expect(location).toBe("/changes/review?step=review");
+  });
+
   // REQ-052 "< 1 วินาที" เป็นเวลาในเบราว์เซอร์จริง — jsdom วัดไม่ได้ จึงตรวจแบบ deterministic:
   // จำนวนแถวที่สร้างจริงมีขอบเขต (virtualize) ไม่ใช่นาฬิกา (review 2-3 B1)
   it("virtualizes diffs over 2,000 lines and renders smaller diffs in full", async () => {
