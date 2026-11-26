@@ -34,8 +34,11 @@ from bmad_studio.core.path_guard import FLOW_RULES, GuardedPath, PathGuard
 
 #: validator ต่อ rule ของ path guard: bytes ที่จะเขียน → issues (ว่าง = ผ่าน)
 FileValidator = Callable[[bytes], list[dict[str, str]]]
-#: rule ที่ต้องมี validator — ไม่มี = ปฏิเสธการเขียน (fail closed, AD-8)
-VALIDATED_RULES = FLOW_RULES
+#: rule ที่ต้องมี validator — ไม่มี = ปฏิเสธการเขียน (fail closed, AD-8/AD-9); ลบไฟล์ของ rule เหล่านี้ต้องมี
+#: delete validator (ไม่มี = ปฏิเสธ) — CLAUDE.md ลบผ่านแอปไม่ได้เลย
+VALIDATED_RULES = FLOW_RULES | frozenset({"claude-md"})
+#: rule ที่ลบได้โดยไม่ต้องมี delete validator (ลบ overlay = กลับไปใช้ default ที่ตรวจแล้ว)
+DELETE_WITHOUT_VALIDATOR = frozenset({"flow-project"})
 
 TOKEN_TTL_SECONDS = 10 * 60
 HISTORY_LIMIT = 500
@@ -266,6 +269,15 @@ class WritePipeline:
             return [{"code": "validator_missing", "error": "ตรวจไฟล์นี้ไม่ได้ จึงบันทึกไม่ได้"}]
         return []
 
+    def _validate_delete(self, rule: str) -> list[dict[str, str]]:
+        """การลบ (ย้ายไป backup) ของ rule นี้ — rule ที่ต้องตรวจแต่ไม่มี delete validator = ปฏิเสธ (fail closed)."""
+        check = self.delete_validators.get(rule)
+        if check is not None:
+            return list(check())
+        if rule in VALIDATED_RULES and rule not in DELETE_WITHOUT_VALIDATOR:
+            return [{"code": "delete_forbidden", "error": "ลบไฟล์นี้ผ่านแอปไม่ได้"}]
+        return []
+
     @staticmethod
     def _ack_scope(advice: list[dict[str, str]]) -> list[str]:
         from bmad_studio.core.flow.ux_guard import ack_scope
@@ -274,7 +286,7 @@ class WritePipeline:
 
     def _lock(self, path: GuardedPath) -> threading.Lock:
         # ไฟล์ flow ทุกไฟล์ใช้ lock เดียว: overlay ถูกตรวจกับ default ปัจจุบัน — default ต้องไม่เปลี่ยนระหว่างตรวจกับเขียน
-        key = "flow-files" if path.rule in VALIDATED_RULES else os.path.normcase(os.fspath(path.path))
+        key = "flow-files" if path.rule in FLOW_RULES else os.path.normcase(os.fspath(path.path))
         with self._locks_guard:
             return self._locks.setdefault(key, threading.Lock())
 
@@ -307,8 +319,8 @@ class WritePipeline:
             errors.extend(_whitespace_errors(current, proposal.proposed))
         if not delete:
             errors.extend(self._validate(guarded.rule, proposal.proposed))
-        elif guarded.rule in self.delete_validators:
-            errors.extend(self.delete_validators[guarded.rule]())
+        else:
+            errors.extend(self._validate_delete(guarded.rule))
         try:
             diff = unified(current.text, "" if delete else fs.decode(proposal.proposed).text)
         except StudioError:  # ผลลัพธ์ไม่ใช่ข้อความ — ไม่แสดง diff ที่ทำให้เข้าใจผิด
@@ -397,8 +409,7 @@ class WritePipeline:
             if not delete:
                 late = self._validate(guarded.rule, proposed)
             else:
-                check = self.delete_validators.get(guarded.rule)
-                late = list(check()) if check is not None else []
+                late = self._validate_delete(guarded.rule)
             extra = meta.get("extra") or {}
             if not late and guarded.rule in self.advisories:
                 # ทุก kind/op ของ rule ที่มีคำเตือน (flow, flow-default, revert, ลบ): default/overlay/registry อาจเปลี่ยน

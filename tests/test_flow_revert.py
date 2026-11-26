@@ -163,7 +163,7 @@ def test_app_pipeline_validators_use_settings_root(settings: Settings) -> None:
     """validator ที่แอปต่อจริงต้องตรวจ catalog ใต้ VEDA_ROOT และปฏิเสธ gate bypass (ไม่ใช่แค่มี key)."""
     seed_catalog(settings.veda_root)
     validators = create_app(settings).state.writes.validators
-    assert set(validators) == {"flow-default", "flow-project"}
+    assert set(validators) == {"flow-default", "flow-project", "claude-md"}  # story 5-1: CLAUDE.md (AD-9)
     assert validators["flow-default"](DEFAULT_TEMPLATE.read_bytes()) == []
     issues = validators["flow-default"](bypass_text().encode())
     assert any(i["code"] == "locked_gate_violation" and i.get("stage") == "requirements-review" for i in issues)

@@ -1,0 +1,420 @@
+"""CLAUDE.md แก้ได้เฉพาะภายใน marker block ของ bmad-studio (AD-9, REQ-049).
+
+ไฟล์ = **ข้อความนอก marker** (ของคน — ห้ามแตะแม้แต่ byte เดียว รวม BOM/EOL/บรรทัดว่าง) + block::
+
+    <!-- bmad-studio:<block>:start -->
+    ...เนื้อหาที่แอป generate...
+    <!-- bmad-studio:<block>:end -->
+
+กติกาของ marker (ตรวจบน bytes ไม่ใช่ text ที่ normalize แล้ว):
+
+- marker = บรรทัดที่ (ไม่นับ EOL) ตรงกับข้อความข้างบน **ตัวต่อตัวแบบ ASCII** ไม่มีช่องว่างหน้า/หลัง และอยู่นอก code fence
+  (```` ``` ```` / ``~~~``) — marker ใน fence คือเอกสาร ไม่ใช่ marker
+- block ที่รู้จักมีแค่ :data:`BLOCKS`; ชื่ออื่น ซ้ำ ซ้อน สลับลำดับ ไม่ปิด หรือบรรทัดหน้าตาคล้าย marker
+  (fullwidth, Cyrillic, zero-width, ช่องว่างเกิน) = ``errors[]`` — **ไม่เดา** ว่าผู้เขียนตั้งใจอะไร (fail closed)
+- :func:`outside` = ไฟล์ที่ตัด block ทั้งก้อน (บรรทัด start ถึงบรรทัด end พร้อม EOL) ออก; ไฟล์ที่จบด้วย block ซึ่งไม่มี
+  EOL ปิดท้าย — EOL สุดท้ายที่เหลือเป็นของ block (ไฟล์เดิมไม่มี EOL ท้าย) การแทรกครั้งแรกจึงไม่แตะ bytes ของไฟล์เดิม
+- validator ของ rule ``claude-md`` (:func:`validate_change`) ใช้กับ **ทุก kind** ที่เขียนไฟล์นี้ รวม revert:
+  ``outside(proposed) == outside(current)`` (retro epic-2 F6 / review N-revert-validator); ลบไฟล์ = ปฏิเสธเสมอ
+
+เนื้อหาใน block สร้างฝั่ง server เท่านั้น (:func:`generate`) — client เลือกได้แค่ชื่อ block; ข้อความจากทะเบียน agent
+ถูก escape (``<``/``>``/``|``/control) และผลถูกตรวจ round-trip ก่อนคืน (injection ปิด block ก่อนเวลาไม่ได้).
+"""
+from __future__ import annotations
+
+import re
+import unicodedata
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from bmad_studio.adapters import fs
+from bmad_studio.core.errors import StudioError
+from bmad_studio.core.paths import VedaPaths
+
+RESOLVER_BLOCK = "flow-resolver-rule"
+DISPATCH_BLOCK = "dispatch-table"
+BLOCKS: tuple[str, ...] = (RESOLVER_BLOCK, DISPATCH_BLOCK)
+RULE = "claude-md"
+TARGET = "CLAUDE.md"
+
+#: repo ของ bmad-studio (ที่ติดตั้งแพ็กเกจนี้) — ใช้สร้างคำสั่งมาตรฐานใน block (AD-9; retro epic-3 A3)
+REPO_ROOT = Path(__file__).resolve().parents[3]
+#: รูปมาตรฐานเดียวของคำสั่ง resolver ใน CLAUDE.md/agent — ห้ามใช้ exe ของ entry point (Application Control บล็อก)
+_REPO = REPO_ROOT.as_posix()
+RESOLVE_PREFIX = f"uv run --project {f'"{_REPO}"' if ' ' in _REPO else _REPO} python -m bmad_studio.cli flow resolve"
+RESOLVE_COMMAND = f"{RESOLVE_PREFIX} <project> [--json]"
+
+#: section ที่ block ถูกแทรกครั้งแรก (ท้าย section ก่อนหัวข้อระดับ 1–2 ถัดไป); ไม่พบ = ท้ายไฟล์
+ANCHORS: Mapping[str, str] = {
+    RESOLVER_BLOCK: "## กติกาการ dispatch",
+    DISPATCH_BLOCK: "## Subagent ที่มี",
+}
+
+_BOM = b"\xef\xbb\xbf"
+_EXACT_FORM = re.compile(rb"<!-- bmad-studio:([^\s:]*):(start|end) -->")
+_FENCE_OPEN = re.compile(rb" {0,3}(`{3,}|~{3,})")
+_HEADING = re.compile(rb" {0,3}#{1,2}(?:[ \t]|$)")
+# อักษรที่หน้าตาเหมือนละติน (Cyrillic/Greek ที่พบบ่อย) — ใช้ตรวจ marker ปลอมเท่านั้น
+_CONFUSABLES = str.maketrans({
+    "а": "a", "в": "b", "е": "e", "о": "o", "р": "p", "с": "c", "т": "t", "у": "y", "х": "x", "к": "k", "м": "m",
+    "н": "h", "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "ս": "u", "ɑ": "a", "ο": "o", "α": "a", "ε": "e", "ι": "i",
+    "τ": "t", "υ": "u", "ν": "v", "ѡ": "w", "ʙ": "b", "ᴅ": "d", "ꜱ": "s",
+})
+
+
+def marker(block: str, edge: str) -> bytes:
+    return f"<!-- bmad-studio:{block}:{edge} -->".encode("ascii")
+
+
+def issue(code: str, message: str, **extra: Any) -> dict[str, Any]:
+    return {"code": code, "error": message, **extra}
+
+
+@dataclass(frozen=True)
+class _Line:
+    start: int  # offset ใน body
+    end: int  # ท้ายเนื้อหา (ไม่รวม EOL)
+    next: int  # หลัง EOL
+    text: bytes
+
+    @property
+    def has_eol(self) -> bool:
+        return self.next > self.end
+
+
+@dataclass(frozen=True)
+class Block:
+    name: str
+    span: tuple[int, int]  # ช่วงใน body ที่ outside() ตัดทิ้ง
+    inner: tuple[int, int]  # เนื้อหาระหว่าง marker
+    start_line: int  # เลขบรรทัด (เริ่ม 1) ของ marker start
+
+
+@dataclass
+class Parsed:
+    bom: bytes
+    body: bytes
+    lines: list[_Line]
+    blocks: dict[str, Block] = field(default_factory=dict)
+    issues: list[dict[str, Any]] = field(default_factory=list)
+    fenced: set[int] = field(default_factory=set)  # index ของบรรทัดที่อยู่ใน code fence (รวมบรรทัด fence)
+
+    def inner_bytes(self, name: str) -> bytes | None:
+        block = self.blocks.get(name)
+        return None if block is None else self.body[block.inner[0]:block.inner[1]]
+
+    @property
+    def eol(self) -> bytes:
+        crlf = self.body.count(b"\r\n")
+        return b"\r\n" if crlf and crlf * 2 >= self.body.count(b"\n") else b"\n"
+
+
+def _split(body: bytes) -> list[_Line]:
+    lines: list[_Line] = []
+    pos = 0
+    while pos < len(body):
+        nl = body.find(b"\n", pos)
+        if nl < 0:
+            lines.append(_Line(pos, len(body), len(body), body[pos:]))
+            break
+        end = nl - 1 if nl > pos and body[nl - 1:nl] == b"\r" else nl
+        lines.append(_Line(pos, end, nl + 1, body[pos:end]))
+        pos = nl + 1
+    return lines
+
+
+def _looks_like_marker(text: bytes) -> bool:
+    """บรรทัดรูป HTML comment ที่ normalize แล้วอ้าง bmad-studio — แต่ไม่ใช่ marker ตัวต่อตัว."""
+    head = text.lstrip(b" \t")
+    # ทางลัด: อักษร ASCII อื่นที่ไม่ใช่ "<" หรืออักษรไทย ขึ้นต้นแล้ว NFKC ไม่กลายเป็น "<" (Cf/อักษรคล้ายไม่ใช่ ASCII)
+    if not head or (head[0] < 0x80 and head[:1] != b"<") or head[:2] in (b"\xe0\xb8", b"\xe0\xb9"):
+        return False
+    value = unicodedata.normalize("NFKC", text.decode("utf-8", "replace"))
+    value = "".join(ch for ch in value if unicodedata.category(ch) != "Cf").translate(_CONFUSABLES).casefold().strip()
+    if not (value.startswith("<!") and value.endswith(">")):
+        return False
+    # รูป marker = อ้าง bmad-studio และจบด้วย start/end — comment ทั่วไปที่พูดถึง bmad-studio ไม่นับ
+    skeleton = re.sub(r"[^a-z0-9]", "", value)
+    return "bmadstudio" in skeleton and skeleton.endswith(("start", "end"))
+
+
+def parse(raw: bytes) -> Parsed:
+    """แยก bytes ของ CLAUDE.md; ปัญหาทุกอย่างอยู่ใน ``issues`` (ว่าง = แก้ block ได้อย่างปลอดภัย)."""
+    bom = _BOM if raw.startswith(_BOM) else b""
+    body = raw[len(bom):]
+    parsed = Parsed(bom, body, _split(body))
+    try:
+        body.decode("utf-8")
+    except UnicodeDecodeError:
+        parsed.issues.append(issue("claude_md_unsupported_encoding", "CLAUDE.md ไม่ใช่ข้อความ UTF-8 — แอปแก้ไฟล์นี้ไม่ได้"))
+        return parsed
+    fence: tuple[bytes, int] | None = None
+    open_block: tuple[str, int] | None = None  # (ชื่อ, index ของบรรทัด start)
+    seen: set[str] = set()
+    for index, line in enumerate(parsed.lines):
+        number = index + 1
+        text = line.text
+        if fence is not None:
+            parsed.fenced.add(index)
+            stripped = text.lstrip(b" ")
+            run = stripped.rstrip(b" \t")
+            if len(text) - len(stripped) <= 3 and len(run) >= fence[1] and run == fence[0] * len(run):
+                fence = None
+            continue
+        opened = _FENCE_OPEN.match(text)
+        # backtick fence ที่ info string มี backtick ไม่ใช่ fence (CommonMark)
+        if opened and opened.group(1)[:1] == b"`" and b"`" in text[opened.end():]:
+            opened = None
+        if opened:
+            run = opened.group(1)
+            fence = (run[:1], len(run))
+            parsed.fenced.add(index)
+            continue
+        exact = _EXACT_FORM.fullmatch(text)
+        if exact is None:
+            if _looks_like_marker(text):
+                parsed.issues.append(issue("claude_md_marker_lookalike",
+                                           f"บรรทัด {number} หน้าตาเหมือน marker ของ bmad-studio แต่ไม่ตรงตัว "
+                                           "(ช่องว่าง/อักษรคล้าย/ตัวอักษรที่มองไม่เห็น) — แก้มือก่อน", line=number))
+            continue
+        name, edge = exact.group(1).decode("ascii", "replace"), exact.group(2).decode("ascii")
+        if name not in BLOCKS:
+            parsed.issues.append(issue("claude_md_marker_unknown", f"บรรทัด {number}: ไม่รู้จัก block ชื่อนี้", line=number))
+            continue
+        if edge == "start":
+            if open_block is not None:
+                parsed.issues.append(issue("claude_md_marker_nested",
+                                           f"บรรทัด {number}: เปิด block {name} ซ้อนใน {open_block[0]}", line=number))
+                continue
+            if name in seen:
+                parsed.issues.append(issue("claude_md_marker_duplicate", f"บรรทัด {number}: block {name} ซ้ำ",
+                                           line=number, block=name))
+                continue
+            seen.add(name)
+            open_block = (name, index)
+            continue
+        if open_block is None or open_block[0] != name:
+            parsed.issues.append(issue("claude_md_marker_unbalanced",
+                                       f"บรรทัด {number}: ปิด block {name} โดยไม่มีการเปิดที่ตรงกัน", line=number))
+            continue
+        first = parsed.lines[open_block[1]]
+        parsed.blocks[name] = Block(name, (first.start, line.next), (first.next, line.start), open_block[1] + 1)
+        open_block = None
+    if fence is not None:
+        parsed.issues.append(issue("claude_md_unclosed_fence",
+                                   "CLAUDE.md มี code fence ที่ไม่ได้ปิด — แอปบอกไม่ได้ว่า marker ใดอยู่ใน fence แก้มือก่อน"))
+    if open_block is not None:
+        parsed.issues.append(issue("claude_md_marker_unbalanced",
+                                   f"บรรทัด {open_block[1] + 1}: block {open_block[0]} ไม่มี marker ปิด",
+                                   line=open_block[1] + 1))
+    return parsed
+
+
+def split_outside(parsed: Parsed) -> tuple[bytes, bytes]:
+    """(bytes นอก marker block ทั้งหมด, EOL ที่ block ท้ายไฟล์เป็นเจ้าของ) — ดู :func:`outside`."""
+    out, pos = [parsed.bom], 0
+    for block in sorted(parsed.blocks.values(), key=lambda b: b.span[0]):
+        out.append(parsed.body[pos:block.span[0]])
+        pos = block.span[1]
+    out.append(parsed.body[pos:])
+    result, owned = b"".join(out), b""
+    if parsed.blocks and pos == len(parsed.body) and parsed.body and not parsed.body.endswith(b"\n"):
+        # ไฟล์จบด้วย block ที่ไม่มี EOL ปิดท้าย: EOL สุดท้ายก่อน block เป็นของ block (ไฟล์เดิมไม่มี EOL ท้าย)
+        owned = b"\r\n" if result.endswith(b"\r\n") else b"\n" if result.endswith(b"\n") else b""
+        result = result[:len(result) - len(owned)]
+    return result, owned
+
+
+def outside(parsed: Parsed) -> bytes:
+    """bytes นอก marker block ทั้งหมด (ของคน)."""
+    return split_outside(parsed)[0]
+
+
+def _first_diff_line(a: bytes, b: bytes) -> int:
+    limit = min(len(a), len(b))
+    index = next((i for i in range(limit) if a[i] != b[i]), limit)
+    return a[:index].count(b"\n") + 1
+
+
+def _capped(issues: list[dict[str, Any]], limit: int = 20) -> list[dict[str, Any]]:
+    if len(issues) <= limit:
+        return issues
+    return issues[:limit] + [issue("claude_md_more_issues", f"และอีก {len(issues) - limit} ปัญหา — แก้ที่แจ้งแล้วตรวจใหม่")]
+
+
+def validate_change(current: bytes | None, proposed: bytes) -> list[dict[str, Any]]:
+    """validator ของ rule ``claude-md`` (AD-9): ทุก kind รวม revert — bytes นอก marker ต้องเท่าไฟล์ปัจจุบัน."""
+    if current is None:
+        return [issue("claude_md_missing", "ไม่พบ CLAUDE.md — แอปไม่สร้างไฟล์นี้เอง")]
+    now = parse(current)
+    if now.issues:  # แก้มือก่อน — แอปไม่เดาว่า marker ที่ผิดรูปตั้งใจหมายถึงอะไร
+        return _capped([{**i, "error": f"CLAUDE.md ปัจจุบัน: {i['error']}"} for i in now.issues])
+    new = parse(proposed)
+    if new.issues:
+        return _capped([{**i, "error": f"ผลลัพธ์ที่จะเขียน: {i['error']}"} for i in new.issues])
+    (before, owned_before), (after, owned_after) = split_outside(now), split_outside(new)
+    # EOL ที่ block ท้ายไฟล์ถือไว้: แทรกครั้งแรก/คืนค่าการแทรก (ฝั่งหนึ่งว่าง) ได้ แต่ห้ามเปลี่ยน CRLF↔LF ของคน
+    if before != after or (owned_before and owned_after and owned_before != owned_after):
+        return [issue("claude_md_outside_changed",
+                      f"การแก้นี้เปลี่ยนข้อความนอก marker ของ bmad-studio (ตั้งแต่บรรทัด {_first_diff_line(before, after)}) "
+                      "— แอปแก้ได้เฉพาะภายใน block")]
+    return []
+
+
+def delete_issues() -> list[dict[str, Any]]:
+    return [issue("claude_md_delete_forbidden", "ลบ CLAUDE.md ผ่านแอปไม่ได้")]
+
+
+# -- generate ---------------------------------------------------------------------------------------
+
+_CELL_DROP = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+
+
+def md_cell(value: str) -> str:
+    """ข้อความจากไฟล์ agent → เซลล์ตาราง markdown บรรทัดเดียว ที่ไม่มี ``<``/``>`` ดิบ (กัน marker/HTML)."""
+    value = "".join(ch for ch in value if unicodedata.category(ch) != "Cf")
+    value = " ".join(_CELL_DROP.sub(" ", value).split())
+    return value.replace("\\", "\\\\").replace("|", "\\|").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def resolver_lines() -> list[str]:
+    return [
+        "",
+        "### ขั้นถัดไปตาม flow (ส่วนนี้สร้างโดย bmad-studio — แก้ผ่านแอปที่ /changes)",
+        f"- ก่อน dispatch งานถัดไปของโปรเจกต์ใด ให้ orchestrator รัน `{RESOLVE_PREFIX} <project> --json` "
+        "เพื่อรู้ขั้นถัดไป (`next`) — ไม่ต้องให้ server ของ bmad-studio รัน",
+        "- ถ้าโปรเจกต์มี `.veda/projects/<project>/flow.yaml` ให้ใช้ flow ตามนั้น (ขั้นที่ flow ปิดได้สถานะ `skipped` "
+        "พร้อมเหตุผล ไม่ต้อง dispatch); ไม่มีใช้ `.veda/flow.default.yaml` หรือ default ที่มากับ bmad-studio "
+        "ซึ่งเท่ากับลำดับวงจรพัฒนาด้านบน",
+        "- งาน quick track เติม `--track quick`; ผลที่ `ok: false` (flow ผิดกฎ/อ่านไม่ได้) = หยุดและแจ้งผู้ใช้ ห้ามเดาขั้นถัดไป",
+        "- human gate `requirements-review` ล็อกในโค้ดของ resolver — flow ปิด/ย้ายไม่ได้ และ `requirementsReady` "
+        "ยังมาจาก /review ของ app-dashboard เท่านั้น",
+        "- ใช้คำสั่งรูปนี้รูปเดียว (ไม่เรียก exe ของ entry point — Windows Application Control บล็อก)",
+        "",
+    ]
+
+
+def dispatch_lines(paths: VedaPaths) -> list[str]:
+    from bmad_studio.core.catalog import agent_names
+
+    rows = [f"| **{a['name']}** | {md_cell(a['description']) or '—'} |" for a in agent_names(paths)]
+    return [
+        "",
+        "### ทะเบียน agent (ส่วนนี้สร้างจาก `.claude/agents/` โดย bmad-studio — แก้ผ่านแอปที่ /changes)",
+        "| agent | หน้าที่ (จาก frontmatter ของ agent) |",
+        "|---|---|",
+        *(rows or ["| — | ยังไม่มี agent ใน `.claude/agents/` |"]),
+        "",
+    ]
+
+
+def generate(paths: VedaPaths, block: str) -> list[str]:
+    if block == RESOLVER_BLOCK:
+        return resolver_lines()
+    if block == DISPATCH_BLOCK:
+        return dispatch_lines(paths)
+    raise StudioError("invalid_request", "ไม่รู้จัก block นี้", 422)
+
+
+def render_inner(lines: list[str], eol: bytes) -> bytes:
+    return b"".join(line.encode("utf-8") + eol for line in lines)
+
+
+def _insert_at(parsed: Parsed, block: str) -> int | None:
+    """offset ใน body สำหรับแทรกครั้งแรก: ต้นบรรทัดหัวข้อระดับ 1–2 ถัดจาก section ที่กำหนด; None = ท้ายไฟล์."""
+    anchor = ANCHORS[block].encode("utf-8")
+    inside = [b.span for b in parsed.blocks.values()]
+
+    def usable(i: int) -> bool:
+        line = parsed.lines[i]
+        return i not in parsed.fenced and not any(s <= line.start < e for s, e in inside)
+
+    found = next((i for i, line in enumerate(parsed.lines) if usable(i) and line.text.startswith(anchor)), None)
+    if found is None:
+        return None
+    for i in range(found + 1, len(parsed.lines)):
+        if usable(i) and _HEADING.match(parsed.lines[i].text):
+            return parsed.lines[i].start
+    return None
+
+
+def apply_block(raw: bytes, block: str, lines: list[str]) -> bytes:
+    """bytes ใหม่ของไฟล์: แทนภายใน block เดิม หรือแทรก block ใหม่ ณ ตำแหน่งที่กำหนด — ตรวจ round-trip ก่อนคืน."""
+    parsed = parse(raw)
+    if parsed.issues:
+        raise StudioError("claude_md_current_invalid", "marker ใน CLAUDE.md ปัจจุบันผิดรูป", 422)
+    eol = parsed.eol
+    inner = render_inner(lines, eol)
+    body = parsed.body
+    existing = parsed.blocks.get(block)
+    if existing is not None:
+        new_body = body[:existing.inner[0]] + inner + body[existing.inner[1]:]
+    else:
+        whole = marker(block, "start") + eol + inner + marker(block, "end")
+        at = _insert_at(parsed, block)
+        if at is not None:
+            new_body = body[:at] + whole + eol + body[at:]
+        elif not body or body.endswith(b"\n"):
+            new_body = body + whole + eol
+        else:  # ไฟล์ไม่มี EOL ท้าย — block เป็นเจ้าของ EOL ที่นำหน้า (outside เท่าเดิม)
+            new_body = body + eol + whole
+    result = parsed.bom + new_body
+    check = parse(result)
+    if check.issues or check.inner_bytes(block) != inner or outside(check) != outside(parsed):
+        raise StudioError("claude_md_render_failed", "สร้างข้อเสนอที่ไม่แตะข้อความนอก marker ไม่ได้", 422)
+    return result
+
+
+def block_state(raw: bytes | None, block: str, lines: list[str]) -> str:
+    """``missing`` (ยังไม่ใช้) / ``applied`` (ใช้แล้ว) / ``stale`` (ล้าสมัย) / ``invalid`` (marker ผิดรูป / ไม่มีไฟล์)."""
+    if raw is None:
+        return "invalid"
+    parsed = parse(raw)
+    if parsed.issues:
+        return "invalid"
+    current = parsed.inner_bytes(block)
+    if current is None:
+        return "missing"
+    return "applied" if current == render_inner(lines, parsed.eol) else "stale"
+
+
+class ClaudeMdKind:
+    """``ChangeRequest{kind: "claude-md", target: "CLAUDE.md", payload: {block}}`` — เนื้อหาสร้างฝั่ง server."""
+
+    name = "claude-md"
+    rules = frozenset({RULE})
+    check_whitespace = True
+
+    def __init__(self, paths: VedaPaths) -> None:
+        self.paths = paths
+
+    def propose(self, target: Any, current: fs.TextDoc, payload: Mapping[str, Any]) -> Any:
+        from bmad_studio.core.writes import Proposal
+
+        block = payload.get("block")
+        if not isinstance(block, str) or block not in BLOCKS:
+            raise StudioError("invalid_request", "payload.block ต้องเป็น flow-resolver-rule หรือ dispatch-table", 422)
+        if set(payload) - {"block"}:
+            raise StudioError("invalid_request", "kind claude-md รับเฉพาะ payload.block (เนื้อหาสร้างโดยแอป)", 422)
+        if getattr(target, "rel", TARGET) != TARGET:
+            raise StudioError("path_forbidden", "kind claude-md เขียนได้เฉพาะ CLAUDE.md ที่ราก veda", 403)
+        if not current.exists:
+            raise StudioError("claude_md_missing", "ไม่พบ CLAUDE.md — แอปไม่สร้างไฟล์นี้เอง", 422)
+        parsed = parse(current.raw)
+        if parsed.issues:
+            return Proposal(current.raw, [], validate_change(current.raw, current.raw), {"block": block})
+        return Proposal(apply_block(current.raw, block, generate(self.paths, block)), [], [], {"block": block})
+
+
+def file_validators(paths: VedaPaths) -> dict[str, Any]:
+    def claude_md(proposed: bytes) -> list[dict[str, Any]]:
+        return validate_change(fs.read_bytes(paths.claude_md), proposed)
+
+    return {RULE: claude_md}
+
+
+__all__ = ["BLOCKS", "DISPATCH_BLOCK", "RESOLVER_BLOCK", "RESOLVE_COMMAND", "RESOLVE_PREFIX", "ClaudeMdKind",
+           "apply_block", "block_state", "delete_issues", "file_validators", "generate", "md_cell", "outside",
+           "parse", "validate_change"]

@@ -26,6 +26,10 @@ class VedaPaths:
         return self.root / ".claude" / "skills"
 
     @property
+    def claude_md(self) -> Path:
+        return self.root / "CLAUDE.md"
+
+    @property
     def agents_dir(self) -> Path:
         return self.root / ".claude" / "agents"
 

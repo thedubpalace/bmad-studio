@@ -28,6 +28,7 @@ from bmad_studio.api.routes import flows as flows_routes
 from bmad_studio.api.routes import projects as projects_routes
 from bmad_studio.api.routes import session as session_routes
 from bmad_studio.api.routes import web as web_routes
+from bmad_studio.core import claude_md
 from bmad_studio.core.credentials import CredentialStore
 from bmad_studio.core.errors import StartupError, StudioError
 from bmad_studio.core.path_guard import PathGuard
@@ -95,11 +96,13 @@ def _build_pipeline(settings: Settings) -> WritePipeline:
     state = RuntimeState(settings.runtime_dir)
     root = Path(settings.veda_root or ".")
     paths = VedaPaths(root)
-    kinds: dict = {"revert": RevertKind(state), "flow": FlowKind(paths), "flow-default": FlowDefaultKind(paths)}
+    kinds: dict = {"revert": RevertKind(state), "flow": FlowKind(paths), "flow-default": FlowDefaultKind(paths),
+                   "claude-md": claude_md.ClaudeMdKind(paths)}
     if settings.enable_text_kind:
         kinds["text"] = TextKind()
     return WritePipeline(PathGuard(root), state, settings.session_secret_value(), kinds,
-                         validators=file_validators(paths), delete_validators=delete_validators(paths),
+                         validators={**file_validators(paths), **claude_md.file_validators(paths)},
+                         delete_validators={**delete_validators(paths), claude_md.RULE: claude_md.delete_issues},
                          advisories=advisories(paths))
 
 
