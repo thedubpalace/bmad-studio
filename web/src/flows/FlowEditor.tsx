@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -105,38 +106,70 @@ function valueText(field: EditableField, value: unknown): string {
 /** dialog/sheet ที่เปิดอยู่ (บนสุด = ท้ายสุด) — Esc/Tab ทำงานกับตัวบนสุดเท่านั้น */
 const trapStack: HTMLElement[] = [];
 
+const FOCUSABLE = "button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), a[href], [tabindex='0']";
+
+/** ตัวที่ควรได้ focus แรก: ``[data-autofocus]`` ถ้ามี ไม่งั้นตัวแรกที่ focus ได้ */
+function initialTarget(node: HTMLElement): HTMLElement | null {
+  return node.querySelector<HTMLElement>("[data-autofocus]") ?? node.querySelector<HTMLElement>(FOCUSABLE);
+}
+
+/**
+ * focus trap ของ dialog/sheet: focus แรกไปที่ ``[data-autofocus]`` (ตั้งใน layout effect แล้วยืนยันอีกครั้งในเฟรมถัดไป
+ * — คลิกเมาส์/Enter จริงมี event ที่มาทีหลังและดึง focus ออกได้ ซึ่ง element.click() ใน test ไม่มี), และดึง focus
+ * กลับเข้ามาทุกครั้งที่ไปอยู่นอก dialog (focusin + Tab) ไม่ใช่แค่วนที่ปุ่มแรก/สุดท้าย (review 4-2 B1)
+ */
 function useFocusTrap(ref: React.RefObject<HTMLElement | null>, active: boolean, onEscape?: () => void) {
   const escape = useRef(onEscape);
   escape.current = onEscape;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!active) return;
     const opener = document.activeElement;
     const node = ref.current;
-    if (node) trapStack.push(node);
+    if (!node) return;
+    trapStack.push(node);
+    const isTop = () => trapStack[trapStack.length - 1] === node;
+    const pullIn = () => {
+      if (isTop() && !node.contains(document.activeElement)) initialTarget(node)?.focus();
+    };
+    initialTarget(node)?.focus();
+    const frame = window.requestAnimationFrame(pullIn);
+    const late = window.setTimeout(pullIn, 120);
+    function onFocusIn(event: FocusEvent) {
+      if (isTop() && event.target instanceof Node && !node!.contains(event.target)) initialTarget(node!)?.focus();
+    }
     function onKey(event: KeyboardEvent) {
-      if (!node || trapStack[trapStack.length - 1] !== node) return;
+      if (!isTop()) return;
       if (event.key === "Escape" && escape.current) {
+        if (event.defaultPrevented) return; // control ข้างในจัดการ Esc เองแล้ว
         event.preventDefault();
         escape.current();
         return;
       }
       if (event.key !== "Tab") return;
-      const items = node.querySelectorAll<HTMLElement>("button:not([disabled]), input, select, a[href], [tabindex='0']");
+      const items = Array.from(node!.querySelectorAll<HTMLElement>(FOCUSABLE));
       if (items.length === 0) return;
       const first = items[0];
       const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      const at = document.activeElement;
+      if (!(at instanceof HTMLElement) || !node!.contains(at)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && at === first) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (!event.shiftKey && at === last) {
         event.preventDefault();
         first.focus();
       }
     }
     document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocusIn, true);
     return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(late);
       document.removeEventListener("keydown", onKey);
-      const at = node ? trapStack.lastIndexOf(node) : -1;
+      document.removeEventListener("focusin", onFocusIn, true);
+      const at = trapStack.lastIndexOf(node);
       if (at >= 0) trapStack.splice(at, 1);
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
@@ -152,7 +185,6 @@ function ConfirmWarning({ codes, warnings, onCancel, onConfirm }: {
   const titleId = useId();
   const bodyId = useId();
   useFocusTrap(ref, true, onCancel);
-  useEffect(() => cancelRef.current?.focus(), []);
   const ux = codes.includes(ACK_UX);
   const details = warnings.filter((w) => codes.includes(w.code));
   return (
@@ -165,7 +197,7 @@ function ConfirmWarning({ codes, warnings, onCancel, onConfirm }: {
           {details.map((w, i) => <p key={i}>{w.error}</p>)}
         </div>
         <div className="dialog__actions">
-          <button ref={cancelRef} type="button" className="button button--secondary" onClick={onCancel}>
+          <button ref={cancelRef} type="button" className="button button--secondary" onClick={onCancel} data-autofocus>
             {th.flowEditor.uxCancel}
           </button>
           <button type="button" className="button button--warn" onClick={onConfirm}>
@@ -181,15 +213,12 @@ function Sheet({ title, onClose, children }: { title: string; onClose: () => voi
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useFocusTrap(ref, true, onClose);
-  useEffect(() => {
-    ref.current?.querySelector<HTMLElement>(".sheet__close")?.focus();
-  }, []);
   return (
     <div className="overlay overlay--sheet" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div ref={ref} className="sheet surface-solid" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="sheet__head">
           <h2 id={titleId} className="sheet__title mono">{title}</h2>
-          <button type="button" className="icon-button sheet__close" onClick={onClose} aria-label={th.flowEditor.close}>
+          <button type="button" className="icon-button sheet__close" onClick={onClose} aria-label={th.flowEditor.close} data-autofocus>
             <Icon name="cross" />
           </button>
         </div>
@@ -625,7 +654,7 @@ export function FlowEditor({ source }: { source: FlowEditorSource }) {
   const [skills, setSkills] = useState<SkillName[] | null>(null);
   const [announce, setAnnounce] = useState("");
   const [picked, setPicked] = useState<{ id: string; snapshot: Stage[] } | null>(null);
-  const [uxPrompt, setUxPrompt] = useState<{ before: Draft; codes: string[] } | null>(null);
+  const [uxPrompt, setUxPrompt] = useState<{ before: Draft; codes: string[]; fromSubmit?: boolean } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -650,8 +679,9 @@ export function FlowEditor({ source }: { source: FlowEditorSource }) {
       lastClean.current = null;
       setLoad({ kind: "ready", view: data });
       setDraft(stored ? stored.draft : draftFromView(data));
-      // คำเตือนที่มีอยู่แล้วในไฟล์ที่บันทึกไว้ (ปิด ux ไปก่อนหน้า) ไม่ถามซ้ำทุกครั้งที่แก้ขั้นอื่น
-      setAcknowledged(stored ? stored.acknowledged : (data.warnings ?? []).map((w) => w.code));
+      // ไม่ยืนยันแทนผู้ใช้: สถานะที่โหลดมาซึ่งปิด ux อยู่แล้ว (จาก default/revert/แก้มือ) แสดงเป็นแบนเนอร์
+      // และถามตอนกดตรวจสอบ — ไม่ถามทุกครั้งที่แก้ขั้นอื่น (review 4-2 N1, 4-3 B1)
+      setAcknowledged(stored ? stored.acknowledged : []);
     } catch (error) {
       setLoad({
         kind: "error",
@@ -872,19 +902,20 @@ export function FlowEditor({ source }: { source: FlowEditorSource }) {
     window.requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-stage="${CSS.escape(id)}"] .flow-row__body`)?.focus());
   };
 
-  const submit = async () => {
+  const submit = async (extraAcks: string[] = []) => {
     if (blockReason || submitting) return;
-    const pendingAcks = (result?.ackRequired ?? []).filter((c) => !acknowledged.includes(c));
+    const acks = [...acknowledged, ...extraAcks.filter((c) => !acknowledged.includes(c))];
+    const pendingAcks = (result?.ackRequired ?? []).filter((c) => !acks.includes(c));
     if (pendingAcks.length) {
-      setUxPrompt({ before: lastClean.current ?? draft, codes: pendingAcks });
+      setUxPrompt({ before: lastClean.current ?? draft, codes: pendingAcks, fromSubmit: true });
       return;
     }
     setSubmitting(true);
     setSubmitError(null);
     try {
       // ส่งเฉพาะการยืนยันของคำเตือนที่ยังต้องยืนยันอยู่จริง (ack ที่ค้างจากการแก้ก่อนหน้าไม่ถูกส่ง)
-      const acks = acknowledged.filter((c) => (result?.ackRequired ?? []).includes(c));
-      await startChange(source.request(draft, acks, view.base_sha256 ?? null, view.target), source.returnTo, JSON.stringify(draft, null, 2));
+      const send = acks.filter((c) => (result?.ackRequired ?? []).includes(c));
+      await startChange(source.request(draft, send, view.base_sha256 ?? null, view.target), source.returnTo, JSON.stringify(draft, null, 2));
       navigate("/changes/review?step=review");
     } catch (error) {
       setSubmitError(error instanceof ApiError ? error.message : th.flowEditor.previewFailed);
@@ -974,6 +1005,18 @@ export function FlowEditor({ source }: { source: FlowEditorSource }) {
             </div>
           </div>
         ) : null}
+        {(view.warnings ?? []).length && stillAsLoaded ? (
+          <div className="banner banner--warn flow-editor__existing" role="note">
+            <Icon name="alert" size={18} />
+            <div>
+              <p className="banner__title">{th.flowEditor.existingWarnings}</p>
+              <ul>
+                {(view.warnings ?? []).slice(0, 8).map((w, n) => <li key={n}>{w.error}</li>)}
+                {(view.warnings ?? []).length > 8 ? <li>{th.flowEditor.moreItems((view.warnings ?? []).length - 8)}</li> : null}
+              </ul>
+            </div>
+          </div>
+        ) : null}
         {lockedFields.map((f) => (
           <p key={f.field} className="banner flow-editor__entry">
             <Icon name="lock" size={18} />
@@ -1034,13 +1077,18 @@ export function FlowEditor({ source }: { source: FlowEditorSource }) {
           codes={uxPrompt.codes}
           warnings={result?.warnings ?? []}
           onCancel={() => {
-            declined.current = uxPrompt.before;
-            setDraft(uxPrompt.before);
+            if (!uxPrompt.fromSubmit) {
+              declined.current = uxPrompt.before;
+              setDraft(uxPrompt.before);
+            }
             setUxPrompt(null);
           }}
           onConfirm={() => {
-            setAcknowledged((a) => [...a, ...uxPrompt.codes.filter((c) => !a.includes(c))]);
+            const confirmed = uxPrompt;
             setUxPrompt(null);
+            setAcknowledged((a) => [...a, ...confirmed.codes.filter((c) => !a.includes(c))]);
+            // ยืนยันจากปุ่ม "ตรวจสอบ" = ไปต่อที่ DiffPreview ทันที ไม่ต้องกดซ้ำ (review 4-2 N2)
+            if (confirmed.fromSubmit) void submit(confirmed.codes);
           }}
         />
       ) : null}

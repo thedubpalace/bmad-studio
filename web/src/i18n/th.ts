@@ -296,6 +296,8 @@ export const th = {
     uxCancel: "ยกเลิก",
     uxConfirm: "ปิดขั้นนี้",
     ackTitle: "ยืนยันคำเตือนก่อนแก้ต่อ",
+    existingWarnings: "สถานะปัจจุบันมีคำเตือน — ตรวจรายการก่อนบันทึก",
+    moreItems: (n: number) => `และอีก ${n} รายการ`,
     ackConfirm: "ยืนยันและแก้ต่อ",
     unsaved: "มีการแก้ flow ที่ยังไม่บันทึก",
   },

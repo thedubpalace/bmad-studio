@@ -260,6 +260,85 @@ describe("FlowEditor (story 4-2)", () => {
     expect(getPending()?.returnTo).toBe("/p/demo/flow");
   });
 
+  it("dialog trap: focus starts on cancel and is pulled back from anywhere outside (B2)", async () => {
+    await render();
+    await click(row("ux-design").querySelector("input[type=checkbox]") as Element);
+    await settle();
+    // ปิด prompt แรก (จากการแก้) ด้วย Esc แล้วค่อยเปิดจากปุ่มตรวจสอบด้วยคีย์บอร์ดจริง
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(document.querySelector("[role=alertdialog]")).toBeNull();
+    await click(row("ux-design").querySelector("input[type=checkbox]") as Element);
+    await settle();
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    // declined แล้ว (ยังปิด ux อยู่ไม่ได้ — ยกเลิกคืน draft) → เปิด ux อีกครั้งเพื่อให้มีงานบันทึกจริง
+    expect((row("ux-design").querySelector("input[type=checkbox]") as HTMLInputElement).checked).toBe(true);
+    await click(row("ux-design").querySelector("input[type=checkbox]") as Element);
+    await settle();
+    const dialog0 = document.querySelector("[role=alertdialog]") as HTMLElement;
+    expect(dialog0).toBeTruthy();
+    expect(document.activeElement?.textContent).toBe("ยกเลิก");
+    // focus ถูกย้ายไปนอก dialog (เช่น event ของเมาส์จริงที่มาทีหลัง) → ถูกดึงกลับ
+    const outside = byText("รีเซ็ตเป็น default");
+    await act(async () => {
+      outside.focus();
+    });
+    expect(dialog0.contains(document.activeElement)).toBe(true);
+    // Tab ตอน focus อยู่นอก (เช่น body) → กลับเข้า dialog
+    await act(async () => {
+      (document.activeElement as HTMLElement).blur();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    });
+    expect(dialog0.contains(document.activeElement)).toBe(true);
+    // focus หลุดไป body โดยไม่มี focusin/Tab (เช่น mouseup ของคลิกจริง) → re-check ในเฟรมถัดไปดึงกลับ
+    await act(async () => {
+      (document.activeElement as HTMLElement).blur();
+    });
+    expect(document.activeElement).toBe(document.body);
+    await settle(150);
+    expect(document.activeElement?.textContent).toBe("ยกเลิก");
+  });
+
+  it("cancel on the review-button prompt keeps the draft as it is", async () => {
+    view = makeView({ warnings: [{ code: "ux_disabled_frontend", error: "ปิด ux อยู่แล้ว", track: "full" }] });
+    view.tracks.full.stages = view.tracks.full.stages.map((s) => (s.id === "ux-design" ? { ...s, enabled: false } : s));
+    await render();
+    await click(row("devops").querySelector("input[type=checkbox]") as Element);
+    await settle();
+    await click(byText("ตรวจสอบและดูการเปลี่ยนแปลง"));
+    await settle(50);
+    await click(byTextIn(document.querySelector("[role=alertdialog]") as HTMLElement, "ยกเลิก"));
+    expect((row("devops").querySelector("input[type=checkbox]") as HTMLInputElement).checked).toBe(true); // การแก้ยังอยู่
+    expect(previewBodies.length).toBe(0);
+  });
+
+  it("confirming from the review button goes straight to DiffPreview (N2)", async () => {
+    view = makeView({ warnings: [{ code: "ux_disabled_frontend", error: "โปรเจกต์ demo: ปิด ux อยู่แล้ว", track: "full" }] });
+    view.tracks.full.stages = view.tracks.full.stages.map((s) => (s.id === "ux-design" ? { ...s, enabled: false } : s));
+    await render();
+    expect(container.textContent).toContain("สถานะปัจจุบันมีคำเตือน"); // ไม่ยืนยันแทน — แสดงเป็นแบนเนอร์
+    await click(row("devops").querySelector("input[type=checkbox]") as Element);
+    await settle();
+    expect(document.querySelector("[role=alertdialog]")).toBeNull(); // แก้ขั้นอื่นไม่ถาม
+    const primary = byText("ตรวจสอบและดูการเปลี่ยนแปลง");
+    await act(async () => {
+      primary.focus();
+      primary.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      primary.click(); // Enter บนปุ่ม = click ในเบราว์เซอร์
+    });
+    await settle(50);
+    const dialog = document.querySelector("[role=alertdialog]") as HTMLElement;
+    expect(dialog).toBeTruthy();
+    expect(document.activeElement?.textContent).toBe("ยกเลิก");
+    await click(byTextIn(dialog, "ปิดขั้นนี้"));
+    await settle(80);
+    expect(previewBodies.at(-1)?.payload.acknowledged).toEqual(["ux_disabled_frontend"]);
+    expect(container.querySelector("[data-testid=where]")?.textContent).toBe("/changes/review?step=review");
+  });
+
   it("no frontend: ux closes immediately with the 'fits' label", async () => {
     view = makeView({ hasFrontend: false });
     await render();
@@ -423,12 +502,16 @@ describe("FlowEditor inspector and edge cases (review 4-2)", () => {
     expect((row("devops").querySelector("input[type=checkbox]") as HTMLInputElement).checked).toBe(false);
   });
 
-  it("a saved file that already disables ux does not re-prompt on unrelated edits", async () => {
+  it("a saved file that already disables ux does not prompt on unrelated edits, only on review", async () => {
     view = makeView({ warnings: [{ code: "ux_disabled_frontend", error: "ปิด ux อยู่แล้ว", track: "full" }] });
     await render();
     await act(async () => (row("devops").querySelector("input[type=checkbox]") as HTMLElement).click());
     await settle();
     expect(document.querySelector("[role=alertdialog]")).toBeNull();
+    const primary = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("ตรวจสอบและดูการเปลี่ยนแปลง")) as HTMLElement;
+    await act(async () => primary.click());
+    await settle(50);
+    expect(document.querySelector("[role=alertdialog]")).toBeTruthy(); // ไม่ยืนยันแทนผู้ใช้
   });
 
   it("failed validation offers a retry and says why review is blocked", async () => {

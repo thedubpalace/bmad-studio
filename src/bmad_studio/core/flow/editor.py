@@ -129,7 +129,8 @@ def ux_warnings(flow: Flow, has_frontend: bool | None) -> FlowIssues:
     """ปิดขั้นออกแบบ UI ในโปรเจกต์ที่มี (หรือไม่รู้ว่ามี) frontend = คำเตือนที่ต้องยืนยัน (REQ-046 a/b).
 
     "ปิด" ครอบคลุมทุกทางที่ทำให้ developer ไม่ถูกบล็อกด้วยงานออกแบบ: ``enabled: false``, เปลี่ยน agent,
-    เอา ``designReady`` ออกจาก produces, condition อื่นที่ข้ามได้, หรือย้ายไปหลังขั้นลงมือสร้าง — ไม่ใช่แค่สวิตช์เดียว.
+    เอา ``designReady`` ออกจาก produces, condition อื่นที่ข้ามได้, ``optional: true`` (orchestrator อ่านว่าข้ามได้ —
+    review 4-1 N2) หรือย้ายไปหลังขั้นลงมือสร้าง — ไม่ใช่แค่สวิตช์เดียว. ทุกทางเขียนเรียกผ่าน :mod:`.ux_guard`.
     """
     if has_frontend is False:
         return []
@@ -137,8 +138,8 @@ def ux_warnings(flow: Flow, has_frontend: bool | None) -> FlowIssues:
     if full is None:
         return []
     # ขั้นออกแบบที่นับ = agent ux-designer ที่เปิดอยู่, produces designReady และไม่ถูกข้ามด้วย condition อื่น
-    active = [s for s in full.stages if s.agent == UX_AGENT and s.enabled and "designReady" in s.produces
-              and s.condition in (None, "hasFrontend")]
+    active = [s for s in full.stages if s.agent == UX_AGENT and s.enabled and not s.optional
+              and "designReady" in s.produces and s.condition in (None, "hasFrontend")]
     builds = [s for s in full.stages if s.enabled and needs_plan(s)]
     covered = bool(active) and all(any(u.id in policy.ancestors(full.stages, b.id) for u in active) for b in builds)
     if covered:
@@ -147,6 +148,12 @@ def ux_warnings(flow: Flow, has_frontend: bool | None) -> FlowIssues:
     return [issue(ACK_UX, f"{who} แต่ flow ไม่มีขั้นออกแบบ UI (ux-designer) ที่เปิดอยู่ก่อนขั้นลงมือสร้าง — "
                           "developer จะไม่ถูกบล็อกด้วย designReady ของโปรเจกต์นี้ ต้องยืนยันแยก",
                   track=policy.FULL)]
+
+
+def _project_ux(paths: VedaPaths, project: str, flow: Flow) -> FlowIssues:
+    from bmad_studio.core.flow.ux_guard import project_ux
+
+    return project_ux(paths, project, flow)
 
 
 def has_frontend_of(entry: Mapping[str, Any]) -> bool | None:
@@ -185,7 +192,9 @@ def check_draft(paths: VedaPaths, entry: Mapping[str, Any], data: Any, catalog: 
     except FlowInvalid as exc:
         errors.extend(exc.issues)
         overlay = None
-    return DraftCheck(flow, overlay, errors, ux_warnings(flow, has_frontend_of(entry)), default)
+    from bmad_studio.core.flow.ux_guard import project_ux  # ux_guard import โมดูลนี้
+
+    return DraftCheck(flow, overlay, errors, project_ux(paths, str(entry["name"]), flow), default)
 
 
 def draft_result(check: DraftCheck) -> dict[str, Any]:
@@ -311,7 +320,8 @@ def editor_view(paths: VedaPaths, project: str) -> dict[str, Any]:
         "loadError": load_error,
         "policyFix": fix,
         "overrides": count_overrides(current_overlay),
-        "warnings": ux_warnings(flow, has_frontend),
+        # สถานะปัจจุบันปิด ux อยู่แล้ว: แสดงเป็นคำเตือนตั้งแต่เปิดหน้า (UI ไม่ยืนยันแทนผู้ใช้ — review 4-2 N1)
+        "warnings": [] if load_error else _project_ux(paths, name, flow),
         "options": field_options(),
     }
 
@@ -415,12 +425,10 @@ class FlowKind:
         return entry  # find_project เทียบชื่อตรงตัวพิมพ์ — Demo/ บน NTFS ไม่ผ่านแม้เป็นโฟลเดอร์เดียวกับ demo/
 
     def propose(self, target: GuardedPath, current: fs.TextDoc, payload: Mapping[str, Any]) -> Proposal:
+        from bmad_studio.core.flow.ux_guard import ack_errors, advisories, parse_acknowledged
+
         entry = self._project(target)
-        acknowledged = payload.get("acknowledged")
-        acknowledged = [] if acknowledged is None else acknowledged
-        if not isinstance(acknowledged, list) or len(acknowledged) > MAX_ACKS or not all(
-                isinstance(code, str) and code in ACK_CODES for code in acknowledged):
-            raise StudioError("invalid_request", "payload.acknowledged ต้องเป็นรายการ code ของคำเตือนที่รู้จัก", 422)
+        acknowledged = parse_acknowledged(payload, ACK_CODES, MAX_ACKS)
         if not isinstance(payload.get("flow"), Mapping):
             raise StudioError("invalid_request", "ต้องส่ง payload.flow เป็น flow ที่แก้แล้ว (ไม่ใช่ overlay)", 422)
         check = check_draft(self.paths, entry, payload["flow"])
@@ -429,19 +437,20 @@ class FlowKind:
                               {"issues": check.errors})
         # errors ของ draft ใส่ตรงนี้ด้วย (pipeline ตัดรายการซ้ำกับ file validator ``flow-project`` ที่ตรวจ bytes ซ้ำ)
         errors: FlowIssues = list(check.errors)
-        missing = [code for code in check.ack_required if code not in acknowledged]
-        if missing:
-            errors.append(issue("ux_disable_unconfirmed",
-                                "ปิดขั้นออกแบบ UI ของโปรเจกต์ที่มี frontend ต้องยืนยันแยกก่อน", track=policy.FULL))
-        warnings = list(check.warnings)
+        advise = advisories(self.paths)[FLOW_PROJECT_RULE]
+        # คำเตือน ux มาจาก advisory ของ pipeline (ตัวเดียวกับ revert/ลบ) — ที่นี่ใช้แค่ตัดสินว่าขาดการยืนยันไหม
         if check.overlay == {"extends": "default"}:
             # draft = default: ย้าย overlay ไป backup (ไม่มีไฟล์ = pipeline แจ้ง no_change) — default ผ่าน validator แล้ว
-            return Proposal(None, warnings, errors)
+            if not current.exists:
+                return Proposal(None, [], errors)  # ไม่มีอะไรเปลี่ยน — pipeline แจ้ง no_change (ไม่ถาม ack)
+            return Proposal(None, [], errors + ack_errors(advise(target.rel, None), acknowledged),
+                            {"acknowledged": acknowledged})
         name = str(entry["name"])
         text, render_warnings = render_overlay(check.overlay, current, name)
-        warnings.extend(render_warnings)
         doc = current if current.exists else fs.new_doc()
-        return Proposal(doc.encode(text), warnings, errors)
+        proposed = doc.encode(text)
+        return Proposal(proposed, render_warnings, errors + ack_errors(advise(target.rel, proposed), acknowledged),
+                        {"acknowledged": acknowledged})
 
 
 __all__ = ["ACK_UX", "DraftCheck", "FlowKind", "META_KEYS", "check_draft", "draft_result", "editor_view",

@@ -208,10 +208,14 @@ def check_default_draft(paths: VedaPaths, data: Any) -> dict[str, Any]:
         errors.extend(exc.issues)
         overlay = None
     if not errors:
+        from bmad_studio.core.flow.ux_guard import default_ux
+
         broken, already = check_projects(paths, flow, catalog)
         errors.extend(broken)
         warnings.extend(already)
-    return {"errors": errors, "warnings": warnings, "ackRequired": [], "overlay": overlay,
+        warnings.extend(default_ux(paths, flow, None))
+    ack = sorted({w["code"] for w in warnings if w["code"] == "ux_disabled_frontend"})
+    return {"errors": errors, "warnings": warnings, "ackRequired": ack, "overlay": overlay,
             "overrides": count_overrides(overlay), "resetsToDefault": overlay == {"extends": "default"},
             "tracks": tracks_view(flow, packaged)}
 
@@ -317,6 +321,11 @@ class FlowDefaultKind:
     def propose(self, target: GuardedPath, current: fs.TextDoc, payload: Mapping[str, Any]) -> Proposal:
         if target.rel != DEFAULT_REL:
             raise StudioError("path_forbidden", "ไม่อนุญาตให้เขียนไฟล์นี้", 403, {"reason": "kind_rule"})
+        from bmad_studio.core.flow.editor import ACK_CODES, MAX_ACKS
+        from bmad_studio.core.flow.ux_guard import ack_errors, advisories, parse_acknowledged
+
+        acknowledged = parse_acknowledged(payload, ACK_CODES, MAX_ACKS)
+        advise = advisories(self.paths)[FLOW_DEFAULT_RULE]
         data = payload.get("flow")
         if not isinstance(data, Mapping):
             raise StudioError("invalid_request", "ต้องส่ง payload.flow เป็น flow เต็มที่แก้แล้ว", 422)
@@ -336,10 +345,16 @@ class FlowDefaultKind:
         if same_as_packaged:
             if not current.exists:
                 errors.append(issue("no_change", "ใช้ default ที่มากับแอปอยู่แล้ว — ไม่มีอะไรต้องบันทึก"))
-            return Proposal(None, list(already), errors)
+            # คำเตือน ux ต่อโปรเจกต์มาจาก advisory ของ pipeline (ตัวเดียวกับ revert/ลบ); ที่นี่ตัดสินว่าขาดการยืนยันไหม
+            if not current.exists:
+                return Proposal(None, list(already), errors)
+            return Proposal(None, list(already), errors + ack_errors(advise(target.rel, None), acknowledged),
+                            {"acknowledged": acknowledged})
         text, render_warnings = render_default(flow, current)
         doc = current if current.exists else fs.new_doc()
-        return Proposal(doc.encode(text), list(already) + render_warnings, errors)
+        proposed = doc.encode(text)
+        return Proposal(proposed, list(already) + render_warnings,
+                        errors + ack_errors(advise(target.rel, proposed), acknowledged), {"acknowledged": acknowledged})
 
 
 __all__ = ["FlowDefaultKind", "check_default_draft", "check_projects", "default_view", "validate_default_bytes",

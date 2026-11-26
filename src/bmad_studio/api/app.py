@@ -34,6 +34,7 @@ from bmad_studio.core.path_guard import PathGuard
 from bmad_studio.core.flow.editor import FlowKind
 from bmad_studio.core.flow.default_editor import FlowDefaultKind
 from bmad_studio.core.flow.files import delete_validators, file_validators
+from bmad_studio.core.flow.ux_guard import advisories
 from bmad_studio.core.paths import VedaPaths
 from bmad_studio.core.writes import RevertKind, TextKind, WritePipeline
 from bmad_studio.core.settings import DEFAULT_HOST, Settings, check_host, check_startup, get_settings
@@ -98,7 +99,8 @@ def _build_pipeline(settings: Settings) -> WritePipeline:
     if settings.enable_text_kind:
         kinds["text"] = TextKind()
     return WritePipeline(PathGuard(root), state, settings.session_secret_value(), kinds,
-                         validators=file_validators(paths), delete_validators=delete_validators(paths))
+                         validators=file_validators(paths), delete_validators=delete_validators(paths),
+                         advisories=advisories(paths))
 
 
 def create_app(settings: Settings | None = None, *, check: bool = True) -> FastAPI:

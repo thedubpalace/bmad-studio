@@ -11,6 +11,9 @@
 """
 from __future__ import annotations
 
+import hashlib
+import threading
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -87,7 +90,32 @@ def load_default(paths: VedaPaths, catalog: Catalog | None) -> tuple[Flow, str]:
     return flow, source
 
 
+#: ผล parse ของ overlay ต่อ sha256 ของ bytes (review 4-3 N1): ตรวจข้ามโปรเจกต์ parse ทุก overlay หลายรอบต่อ request
+#: และ UI validate ทุก 200ms — bytes เดิม = ผลเดิมเสมอ จึง cache ได้โดยไม่ต้องดู mtime (LRU, ไม่เกิน _CACHE_MAX)
+_CACHE_MAX = 512
+_parse_cache: dict[str, tuple[Overlay | None, FlowIssues]] = {}
+_cache_lock = threading.Lock()
+
+
 def parse_overlay(raw: bytes | str) -> tuple[Overlay | None, FlowIssues]:
+    data = raw.encode("utf-8", "surrogatepass") if isinstance(raw, str) else raw
+    key = ("s" if isinstance(raw, str) else "b") + hashlib.sha256(data).hexdigest()
+    with _cache_lock:
+        hit = _parse_cache.pop(key, None)
+        if hit is not None:
+            _parse_cache[key] = hit  # ย้ายไปท้าย (ใช้ล่าสุด)
+    if hit is None:
+        hit = _parse_overlay(raw)
+        with _cache_lock:
+            _parse_cache[key] = hit
+            while len(_parse_cache) > _CACHE_MAX:
+                _parse_cache.pop(next(iter(_parse_cache)))
+    overlay, issues = hit
+    # สำเนาอิสระทุกครั้ง: ผู้เรียกแก้ผลได้โดยไม่กระทบ request อื่น/เธรดอื่น
+    return (None if overlay is None else overlay.model_copy(deep=True)), [dict(i) for i in issues]
+
+
+def _parse_overlay(raw: bytes | str) -> tuple[Overlay | None, FlowIssues]:
     try:
         data = load_yaml(raw)
     except FlowYamlError as exc:

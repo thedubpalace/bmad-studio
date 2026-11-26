@@ -39,11 +39,13 @@
   margin: 0;
 }
 
+.flow-editor__existing ul,
 .flow-editor__invalid ul {
   margin: var(--s-2) 0;
   padding-inline-start: var(--s-6);
 }
 
+.flow-editor__existing > div,
 .flow-editor__invalid > div {
   flex: 1 1 240px;
   min-width: 0;

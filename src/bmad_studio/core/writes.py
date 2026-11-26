@@ -205,7 +205,8 @@ class WritePipeline:
     def __init__(self, guard: PathGuard, state: RuntimeState, secret: str,
                  kinds: Mapping[str, KindHandler], *, clock: Callable[[], float] = time.time,
                  max_bytes: int = fs.MAX_BYTES, validators: Mapping[str, FileValidator] | None = None,
-                 delete_validators: Mapping[str, Callable[[], list[dict[str, str]]]] | None = None) -> None:
+                 delete_validators: Mapping[str, Callable[[], list[dict[str, str]]]] | None = None,
+                 advisories: Mapping[str, Callable[[str, bytes | None], list[dict[str, str]]]] | None = None) -> None:
         if len(secret) < 32:
             raise ValueError("secret ต้องยาวอย่างน้อย 32 ตัวอักษร")
         self.guard = guard
@@ -214,6 +215,8 @@ class WritePipeline:
         self.validators = dict(validators or {})
         #: ตรวจการลบต่อ rule (เช่น ลบ flow เริ่มต้น = กลับไปใช้ packaged default ต้องตรวจทุกโปรเจกต์ — AD-7)
         self.delete_validators = dict(delete_validators or {})
+        #: คำเตือนต่อ rule ที่ทุก kind ได้ (รวม revert/ลบ) — เช่น ปิดขั้นออกแบบ UI ของโปรเจกต์ที่มี frontend
+        self.advisories = dict(advisories or {})
         self.clock = clock
         self.max_bytes = max_bytes
         self._key = hmac.new(secret.encode(), _TOKEN_CONTEXT, hashlib.sha256).digest()
@@ -305,8 +308,10 @@ class WritePipeline:
                     "old_eof_newline": True, "new_eof_newline": True}
             if not errors:
                 errors.append({"code": "unsupported_encoding", "error": "ผลลัพธ์ไม่ใช่ข้อความ UTF-8"})
+        advisory = self.advisories.get(guarded.rule)
+        advice = list(advisory(guarded.rel, proposal.proposed)) if advisory is not None else []
         errors = _dedupe(errors)
-        warnings = _dedupe(proposal.warnings)
+        warnings = _dedupe(list(proposal.warnings) + advice)
         if diff.get("truncated"):
             if getattr(handler, "allow_truncated", False):
                 warnings.append({"code": "diff_summary_only",
@@ -384,6 +389,14 @@ class WritePipeline:
             else:
                 check = self.delete_validators.get(guarded.rule)
                 late = list(check()) if check is not None else []
+            extra = meta.get("extra") or {}
+            if not late and "acknowledged" in extra and guarded.rule in self.advisories:
+                # kind ที่ต้องยืนยัน (flow/flow-default): default/overlay/registry อาจเปลี่ยนหลัง preview จนปิด ux
+                # ของโปรเจกต์ที่ผู้ใช้ไม่ได้ยืนยัน — ตรวจซ้ำใต้ lock เหมือน validator
+                from bmad_studio.core.flow.ux_guard import ack_errors
+
+                advice = self.advisories[guarded.rule](guarded.rel, None if delete else proposed)
+                late = ack_errors(advice, list(extra.get("acknowledged") or []))
             if late:
                 raise StudioError("has_errors", "ไฟล์นี้ไม่ผ่านการตรวจแล้ว (มีการเปลี่ยนแปลงหลังตัวอย่าง) — เปิดตัวอย่างใหม่",
                                   422, {"errors": late})
