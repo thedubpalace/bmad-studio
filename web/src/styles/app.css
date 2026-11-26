@@ -1349,3 +1349,69 @@ p {
   align-items: center;
   gap: 4px;
 }
+
+/* ---------- ข้อเสนอผูก flow กับ CLAUDE.md (story 5-2) ---------- */
+.proposals {
+  margin-bottom: var(--s-6);
+}
+
+.proposals__note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin: 0 0 var(--s-4);
+  font-weight: 600;
+}
+
+.proposals__subtitle {
+  margin: var(--s-6) 0 var(--s-1);
+  font-size: var(--fs-16, 1rem);
+  font-weight: 650;
+}
+
+.proposal-item {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--s-3) var(--s-6);
+}
+
+.proposal-item__main {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.proposal-item__main code {
+  overflow-wrap: anywhere;
+}
+
+.proposal-item__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+}
+
+.proposal-item__actions .hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.proposal-item__guards {
+  margin: var(--s-1) 0 0;
+  padding-left: var(--s-4);
+}
+
+.proposal-item__diff {
+  flex-basis: 100%;
+  min-width: 0;
+}
+
+.review-summary__note {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-2) 0 0;
+  font-weight: 600;
+}

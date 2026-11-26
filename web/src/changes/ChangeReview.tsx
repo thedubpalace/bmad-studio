@@ -58,6 +58,11 @@ function Summary({ preview }: { preview: ChangePreview }) {
           <span>{high ? th.review.impactHigh : th.review.impactNormal}</span>
         </li>
       </ul>
+      {preview.path === "CLAUDE.md" ? (
+        <p className="review-summary__note">
+          <Icon name="lock" size={16} /> {th.review.claudeMdUntouched}
+        </p>
+      ) : null}
     </div>
   );
 }

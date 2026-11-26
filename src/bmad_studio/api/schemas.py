@@ -426,3 +426,43 @@ class SkillName(BaseModel):
 class SkillNameListEnvelope(BaseModel):
     ok: Literal[True]
     data: list[SkillName]
+
+
+# -- ข้อเสนอผูก flow กับ CLAUDE.md (REQ-049, story 5-2) — คำนวณใน core.claude_md ------------------------
+
+class ClaudeMdBlock(BaseModel):
+    block: Literal["flow-resolver-rule", "dispatch-table"]
+    #: missing = ยังไม่ใช้, applied = ใช้แล้ว, stale = ล้าสมัย, invalid = marker ผิดรูป, unavailable = ไม่มีไฟล์
+    state: Literal["missing", "applied", "stale", "invalid", "unavailable"]
+
+
+class AgentGuardMatch(BaseModel):
+    line: int
+    flag: str
+    stage: str
+    text: str
+    applied: bool
+
+
+class AgentGuardSuggestion(BaseModel):
+    agent: str
+    path: str
+    sha256: str | None = None
+    guards: list[AgentGuardMatch]
+    state: Literal["suggested", "applied"]
+    diff: Diff | None = None
+
+
+class ClaudeMdProposals(BaseModel):
+    path: str
+    exists: bool
+    base_sha256: str | None = None
+    issues: list[Issue] = []
+    blocks: list[ClaudeMdBlock]
+    agentGuards: list[AgentGuardSuggestion]
+    command: str
+
+
+class ClaudeMdProposalsEnvelope(BaseModel):
+    ok: Literal[True]
+    data: ClaudeMdProposals

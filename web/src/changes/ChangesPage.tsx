@@ -8,6 +8,7 @@ import { EmptyState } from "../components/EmptyState";
 import { Icon } from "../components/Icon";
 import { th } from "../i18n/th";
 import { startChange } from "./changeStore";
+import { ClaudeMdProposals } from "./ClaudeMdProposals";
 import { DiffView, type DiffMode } from "./DiffView";
 
 export function typeLabel(entry: Pick<ChangeEntry, "kind" | "op">): string {
@@ -60,7 +61,7 @@ function RevertButton({ entry }: { entry: ChangeEntry }) {
   );
 }
 
-export function ChangesPage() {
+function ChangeHistory() {
   const [items, setItems] = useState<ChangeEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -132,6 +133,15 @@ export function ChangesPage() {
         ))}
       </ul>
     </section>
+  );
+}
+
+export function ChangesPage() {
+  return (
+    <>
+      <ClaudeMdProposals />
+      <ChangeHistory />
+    </>
   );
 }
 

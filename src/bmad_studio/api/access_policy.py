@@ -74,6 +74,8 @@ RULES: list[Rule] = [
     # flow เริ่มต้น (REQ-045, story 4-3)
     *_rules(STUDIO_READ, "GET", "/api/flow-default"),
     *_rules(STUDIO_READ, "POST", "/api/flow-default/validate"),
+    # ข้อเสนอผูก flow กับ CLAUDE.md + guard ของ agent (REQ-049, story 5-2) — อ่านอย่างเดียว
+    *_rules(STUDIO_READ, "GET", "/api/claude-md/proposals"),
     # SPA deep link (/p/..., /agents/...) ได้ shell เดียวกัน — ไม่รวม /api/* (ซึ่งต้องมี rule ของตัวเอง)
     Rule("GET", "/{path:path}", PUBLIC, exclude_prefixes=("/api/",)),
 ]

@@ -33,7 +33,12 @@ describe("ChangesPage", () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
-    vi.stubGlobal("fetch", fetchMock);
+    // ส่วนข้อเสนอ CLAUDE.md (story 5-2) โหลดของตัวเอง — test ในไฟล์นี้ตรวจเฉพาะประวัติ (ดู ClaudeMdProposals.test.tsx)
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) =>
+      url === "/api/claude-md/proposals"
+        ? Promise.resolve(json(200, { ok: true, data: { path: "CLAUDE.md", exists: true, base_sha256: null, issues: [], blocks: [], agentGuards: [], command: "" } }))
+        : fetchMock(url, init),
+    );
     vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q, addEventListener: () => undefined, removeEventListener: () => undefined }));
     fetchMock.mockReset();
     setCsrfToken("csrf");

@@ -415,6 +415,149 @@ def file_validators(paths: VedaPaths) -> dict[str, Any]:
     return {RULE: claude_md}
 
 
-__all__ = ["BLOCKS", "DISPATCH_BLOCK", "RESOLVER_BLOCK", "RESOLVE_COMMAND", "RESOLVE_PREFIX", "ClaudeMdKind",
-           "apply_block", "block_state", "delete_issues", "file_validators", "generate", "md_cell", "outside",
-           "parse", "validate_change"]
+# -- สถานะข้อเสนอ + ข้อเสนอแก้ guard ของ agent (story 5-2) ---------------------------------------------
+
+#: รูปแบบ guard ที่ hard-code ใน agent ซึ่ง flow ปิดขั้นที่เกี่ยวข้องได้ — flag → ขั้นของ flow ที่ผลิต flag นั้น.
+#: ``requirementsReady`` (gate ของคน, AD-8) และ ``planReady`` (plan gate ล็อกในโค้ด — flow ปิดขั้นวางแผนก่อน
+#: develop ไม่ได้) ไม่อยู่ในรายการ: guard เหล่านั้นต้องคงไว้เสมอ
+GUARD_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
+    ("designReady", "ux-design", re.compile(r"`?designReady`?\s*!=\s*`?true`?", re.ASCII)),
+    ("designReady", "ux-design", re.compile(r"`?designReady`?\s*(?:ไม่ใช่|ไม่เป็น|ยังไม่เป็น)\s*`?true`?", re.ASCII)),
+)
+MAX_AGENT_BYTES = 256 * 1024
+#: บอกว่า guard อ้าง resolver แล้ว (ข้อเสนอถูกใช้แล้ว) — ไม่ผูกกับ path ของ repo (ย้าย repo แล้วยังนับว่าใช้แล้ว)
+_GUARD_APPLIED = "bmad_studio.cli flow resolve"
+
+
+def guard_note(stage: str, indent: str) -> str:
+    return (f"{indent}- ยกเว้นเมื่อ flow ของโปรเจกต์ปิดขั้น `{stage}`: รัน `{RESOLVE_PREFIX} <project> --json` "
+            f"— ถ้าขั้น `{stage}` มีสถานะ `skipped` ให้ถือว่าผ่าน guard นี้ (ใช้ผลของ resolver แทนค่าที่ hard-code)")
+
+
+def _indent_width(line: str) -> int:
+    return len(line) - len(line.lstrip(" \t"))
+
+
+def _child_indent(line: str) -> str:
+    """indent ของรายการลูกใต้บรรทัดนี้ (CommonMark: กว้างเท่า marker ของรายการ เช่น ``- `` = 2, ``10. `` = 4)."""
+    lead = line[: _indent_width(line)]
+    rest = line[len(lead):]
+    marker_match = re.match(r"(?:[-*+]|\d{1,9}[.)]) ", rest)
+    return lead + (" " * len(marker_match.group(0)) if marker_match else "")
+
+
+def _scannable(lines: list[str]) -> list[bool]:
+    """บรรทัดที่ตรวจ guard ได้: ไม่ใช่ frontmatter, code fence หรือแถวตาราง (แทรกบรรทัดตรงนั้นจะทำไฟล์เสีย)."""
+    ok = [True] * len(lines)
+    start = 0
+    if lines and lines[0].strip() == "---":
+        end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+        if end is not None:
+            for i in range(end + 1):
+                ok[i] = False
+            start = end + 1
+    fence: str | None = None
+    for i in range(start, len(lines)):
+        stripped = lines[i].strip()
+        if fence is not None:
+            ok[i] = False
+            if stripped.startswith(fence) and set(stripped) == {fence[0]}:
+                fence = None
+            continue
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            fence = stripped[:3]
+            ok[i] = False
+        elif stripped.startswith("|"):
+            ok[i] = False
+    return ok
+
+
+def _already_applied(lines: list[str], index: int) -> bool:
+    """บรรทัดลูก (เยื้องลึกกว่า guard) ถัดจาก guard มีการอ้าง resolver แล้ว."""
+    width = _indent_width(lines[index])
+    for following in lines[index + 1:index + 6]:
+        if not following.strip() or _indent_width(following) <= width:
+            return False
+        if _GUARD_APPLIED in following:
+            return True
+    return False
+
+
+def agent_guards(paths: VedaPaths) -> list[dict[str, Any]]:
+    """agent ที่มี guard ตรง :data:`GUARD_PATTERNS` พร้อมข้อเสนอ (diff) — **อ่านอย่างเดียว ไม่มีทางเขียน**.
+
+    แอปยังไม่บันทึกไฟล์ agent (Epic 7) — ข้อเสนอนี้แสดง diff ให้คนแก้เอง; ไม่สร้าง preview/confirm token.
+    """
+    from bmad_studio.core.catalog import agent_names
+    from bmad_studio.core.diff import unified
+
+    out: list[dict[str, Any]] = []
+    for agent in agent_names(paths):
+        name = agent["name"]
+        rel = f".claude/agents/{name}.md"
+        try:
+            raw = fs.read_bytes(paths.agents_dir / f"{name}.md", MAX_AGENT_BYTES)
+            doc = fs.decode(raw) if raw is not None else None
+        except (StudioError, OSError):
+            continue
+        if doc is None:
+            continue
+        lines = doc.text.split("\n")  # TextDoc.text เป็น LF เสมอ — diff แสดงเป็นบรรทัด ไม่ใช่ bytes
+        scannable = _scannable(lines)
+        new_lines: list[str] = []
+        matches: list[dict[str, Any]] = []
+        for index, line in enumerate(lines):
+            new_lines.append(line)
+            hit = None if not scannable[index] else next(
+                ((flag, stage) for flag, stage, rx in GUARD_PATTERNS if rx.search(line)), None)
+            if hit is None:
+                continue
+            applied = _already_applied(lines, index)
+            matches.append({"line": index + 1, "flag": hit[0], "stage": hit[1], "text": line.strip()[:300],
+                            "applied": applied})
+            if not applied:
+                new_lines.append(guard_note(hit[1], _child_indent(line)))
+        if not matches:
+            continue
+        pending = [m for m in matches if not m["applied"]]
+        out.append({
+            "agent": name, "path": rel, "sha256": doc.sha256, "guards": matches,
+            "state": "applied" if not pending else "suggested",
+            "diff": unified(doc.text, "\n".join(new_lines)) if pending else None,
+        })
+    return out
+
+
+
+def proposals(paths: VedaPaths) -> dict[str, Any]:
+    """สถานะของข้อเสนอแก้ CLAUDE.md ต่อ block + ข้อเสนอแก้ guard ของ agent (อ่านอย่างเดียว)."""
+    read_issue: dict[str, Any] | None = None
+    try:
+        raw = fs.read_bytes(paths.claude_md)
+    except StudioError as exc:  # มีไฟล์แต่อ่านไม่ได้ (ใหญ่เกิน/เป็นโฟลเดอร์) — ไม่ใช่ "ไม่พบ"
+        raw, read_issue = None, issue(exc.code, f"อ่าน CLAUDE.md ไม่ได้: {exc.message_th}")
+    except OSError:
+        raw, read_issue = None, issue("claude_md_unreadable", "อ่าน CLAUDE.md ไม่ได้ (สิทธิ์/ไฟล์ถูกล็อก)")
+    parsed = parse(raw) if raw is not None else None
+    issues = [read_issue] if read_issue else [] if parsed is None else _capped(parsed.issues)
+    blocks = []
+    for block in BLOCKS:
+        if read_issue is not None:
+            state = "invalid"
+        elif raw is None:
+            state = "unavailable"
+        elif issues:
+            state = "invalid"
+        else:
+            state = block_state(raw, block, generate(paths, block))
+        blocks.append({"block": block, "state": state})
+    return {
+        "path": TARGET, "exists": raw is not None or read_issue is not None, "base_sha256": None if raw is None else fs.sha256_hex(raw),
+        "issues": issues, "blocks": blocks, "agentGuards": agent_guards(paths), "command": RESOLVE_COMMAND,
+    }
+
+
+__all__ = ["BLOCKS", "DISPATCH_BLOCK", "GUARD_PATTERNS", "MAX_AGENT_BYTES", "RESOLVER_BLOCK", "RESOLVE_COMMAND",
+           "RESOLVE_PREFIX", "ClaudeMdKind", "agent_guards", "apply_block", "block_state", "delete_issues",
+           "file_validators", "generate", "guard_note", "md_cell", "outside", "parse", "proposals", "split_outside",
+           "validate_change"]
