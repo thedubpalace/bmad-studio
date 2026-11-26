@@ -442,6 +442,9 @@ class AgentGuardMatch(BaseModel):
     stage: str
     text: str
     applied: bool
+    #: ข้อเดียวกันมี gate อื่น (requirementsReady/planReady/…) — ไม่เสนอ diff ให้คนแยกเงื่อนไขเอง (review 5-2 B1)
+    manual: bool = False
+    otherGates: list[str] = []
 
 
 class AgentGuardSuggestion(BaseModel):
@@ -449,7 +452,7 @@ class AgentGuardSuggestion(BaseModel):
     path: str
     sha256: str | None = None
     guards: list[AgentGuardMatch]
-    state: Literal["suggested", "applied"]
+    state: Literal["suggested", "manual", "applied"]
     diff: Diff | None = None
 
 
@@ -461,6 +464,8 @@ class ClaudeMdProposals(BaseModel):
     blocks: list[ClaudeMdBlock]
     agentGuards: list[AgentGuardSuggestion]
     command: str
+    #: repo ใน resolver_project มี pyproject.toml (false = คำสั่งใน block จะรันไม่ได้บนเครื่องนี้)
+    resolverProjectFound: bool = True
 
 
 class ClaudeMdProposalsEnvelope(BaseModel):

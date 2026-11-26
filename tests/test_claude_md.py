@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from bmad_studio.core import claude_md as cm
+from bmad_studio.core.errors import StudioError
 from bmad_studio.core.settings import Settings
 
 from .flowkit import seed_catalog
@@ -422,12 +423,8 @@ COMMAND = re.compile(r"`([^`]*flow resolve[^`]*)`")
 
 
 def test_resolver_block_uses_only_the_standard_command() -> None:
-    # AC: รูปมาตรฐานตัวต่อตัวบนเครื่องนี้; clone ที่อื่นใช้ path ของ repo นั้นในรูปเดียวกัน
-    if cm.REPO_ROOT.as_posix() == "C:/Users/thedu/code/bmad-studio":
-        assert cm.RESOLVE_COMMAND == STANDARD
-    else:
-        assert cm.RESOLVE_COMMAND == STANDARD.replace("C:/Users/thedu/code/bmad-studio", cm.REPO_ROOT.as_posix())
-    assert (cm.REPO_ROOT / "pyproject.toml").is_file()
+    # AC: รูปมาตรฐานตัวต่อตัว — ค่าเริ่มต้นมาจาก settings ไม่ขึ้นกับ checkout ที่รัน (review 5-1 N4)
+    assert cm.RESOLVE_COMMAND == STANDARD
     text = "\n".join(cm.resolver_lines())
     commands = COMMAND.findall(text)
     assert commands and all(c.startswith(cm.RESOLVE_PREFIX + " <project>") for c in commands)
@@ -464,7 +461,8 @@ def test_command_in_block_runs_and_returns_json(settings: Settings) -> None:
     """รันคำสั่งตามข้อความใน block จริง (subprocess) กับ tmp veda ผ่าน VEDA_ROOT — ไม่แตะ veda จริง."""
     root = settings.veda_root
     _veda_with_ux_off(root)
-    command = next(c for c in COMMAND.findall("\n".join(cm.resolver_lines())))
+    # รันกับ checkout ที่กำลังทดสอบ (worktree/clone อื่น) — รูปของข้อความตรึงด้วย test ข้างบนแล้ว
+    command = next(c for c in COMMAND.findall("\n".join(cm.resolver_lines(cm.REPO_ROOT.as_posix()))))
     argv = command.replace("<project>", "demo").split()
     assert argv[:3] == ["uv", "run", "--project"] and "--json" in argv
     env = {**os.environ, "VEDA_ROOT": str(root), "BMAD_STUDIO_VEDA_ROOT": str(root), "PYTHONIOENCODING": "utf-8"}
@@ -473,3 +471,19 @@ def test_command_in_block_runs_and_returns_json(settings: Settings) -> None:
     assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
     data = json.loads(out.stdout.decode("utf-8"))
     assert data["ok"] is True and data["project"] == "demo" and data["next"]["stage"] == "architecture"
+
+
+@pytest.mark.parametrize("raw", [
+    b"x\r```\n<!-- bmad-studio:dispatch-table:start -->\nexample\n<!-- bmad-studio:dispatch-table:end -->\ny\r```\n",
+    b"# t\rmore\r\n",
+    b"a\r",
+])
+def test_lone_cr_fails_closed(raw: bytes) -> None:
+    """review 5-1 N1: CR เดี่ยวเป็น EOL ของ CommonMark — parser ไม่เดา ไม่แก้ไฟล์."""
+    issues = cm.parse(raw).issues
+    assert codes(issues) == {"claude_md_lone_cr"} and issues[0]["line"] >= 1 and "บรรทัด" in issues[0]["error"]
+    with pytest.raises(StudioError) as caught:
+        apply(raw, D)
+    assert caught.value.code == "claude_md_current_invalid"
+    assert codes(cm.validate_change(raw, raw)) == {"claude_md_lone_cr"}
+    assert cm.parse(b"a\r\nb\r\n").issues == []

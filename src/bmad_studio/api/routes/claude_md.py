@@ -19,4 +19,5 @@ router = APIRouter()
 
 @router.get("/api/claude-md/proposals", response_model=ClaudeMdProposalsEnvelope, responses=ERRORS)
 async def claude_md_proposals(request: Request) -> JSONResponse:
-    return ok(await run_in_threadpool(proposals, request.app.state.bmad.paths))
+    return ok(await run_in_threadpool(proposals, request.app.state.bmad.paths,
+                                      request.app.state.settings.resolver_project))

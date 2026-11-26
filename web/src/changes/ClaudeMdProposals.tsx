@@ -81,6 +81,7 @@ function GuardRow({ item }: { item: AgentGuardSuggestion }) {
             <li key={g.line}>
               <span className="mono">{t.guardLine(g.line)}</span> <code>{g.text}</code>
               <span className="hint"> {t.guardStage(g.stage)}</span>
+              {g.manual ? <p className="hint">{t.guardManual((g.otherGates ?? []).join(", "))}</p> : null}
             </li>
           ))}
         </ul>
@@ -148,6 +149,11 @@ export function ClaudeMdProposals() {
                 ))}
               </ul>
             </section>
+          ) : null}
+          {data.resolverProjectFound === false ? (
+            <p className="form-error" role="alert">
+              {t.projectMissing(data.command)}
+            </p>
           ) : null}
           <ul className="item-list">
             {data.blocks.map((item) => (

@@ -6,6 +6,8 @@ export interface AgentGuardMatch {
   stage: string;
   text: string;
   applied: boolean;
+  manual?: boolean;
+  otherGates?: Array<string>;
 }
 
 export interface AgentGuardSuggestion {
@@ -13,7 +15,7 @@ export interface AgentGuardSuggestion {
   path: string;
   sha256?: string | null;
   guards: Array<AgentGuardMatch>;
-  state: "suggested" | "applied";
+  state: "suggested" | "manual" | "applied";
   diff?: Diff | null;
 }
 
@@ -125,6 +127,7 @@ export interface ClaudeMdProposals {
   blocks: Array<ClaudeMdBlock>;
   agentGuards: Array<AgentGuardSuggestion>;
   command: string;
+  resolverProjectFound?: boolean;
 }
 
 export interface ClaudeMdProposalsEnvelope {

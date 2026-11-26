@@ -10,7 +10,8 @@ import ipaddress
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import AliasChoices, Field, SecretStr
+from bmad_studio.core.claude_md import DEFAULT_RESOLVER_PROJECT, check_resolver_project
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from bmad_studio.core.credentials import CredentialsUnavailable, read_credentials
@@ -40,6 +41,13 @@ class Settings(BaseSettings):
     login_rate_window_seconds: int = 900
     cookie_secure: bool = False
     review_url: str = "https://bridgenbrain.duckdns.org/review"
+    #: repo ของ bmad-studio ในคำสั่ง resolver ที่เขียนลง CLAUDE.md/agent (review 5-1 N4) — ที่เดียว ไม่เดาจาก __file__
+    resolver_project: str = DEFAULT_RESOLVER_PROJECT
+
+    @field_validator("resolver_project")
+    @classmethod
+    def _resolver_project_safe(cls, value: str) -> str:
+        return check_resolver_project(value)
     runtime_dir: Path = REPO_ROOT / ".runtime"
     web_dist: Path = REPO_ROOT / "web" / "dist"
     bmad_script_timeout_seconds: float = 20.0

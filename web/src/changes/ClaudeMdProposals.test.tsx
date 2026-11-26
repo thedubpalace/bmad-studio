@@ -150,6 +150,16 @@ describe("ClaudeMdProposals (/changes)", () => {
     expect(buttons("ดู diff")[0].getAttribute("aria-disabled")).toBe("false");
   });
 
+  it("a guard mixed with another gate shows the manual-split state and no diff", async () => {
+    proposals = { ...data, agentGuards: [{ agent: "mixed", path: ".claude/agents/mixed.md", sha256: null, state: "manual", diff: null,
+      guards: [{ line: 4, flag: "designReady", stage: "ux-design", text: "- `planReady != true` และ designReady != true", applied: false,
+        manual: true, otherGates: ["planReady"] }] }] };
+    await render();
+    expect(text()).toContain("ต้องแยกเงื่อนไขเอง");
+    expect(text()).toContain("gate อื่นปนอยู่ (planReady)");
+    expect(buttons("ดู diff")).toHaveLength(2); // เฉพาะสอง block ของ CLAUDE.md
+  });
+
   it("agent guard suggestion is read-only: diff toggles inline and nothing is posted", async () => {
     await render();
     expect(text()).toContain("ข้อเสนอแก้ guard ของ agent");

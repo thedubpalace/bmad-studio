@@ -173,12 +173,16 @@ export const th = {
         body: "ตาราง agent ที่สร้างจาก .claude/agents (ชื่อ + หน้าที่จาก frontmatter)",
       },
     },
+    projectMissing: (command: string) =>
+      `ไม่พบ repo ของ bmad-studio ตาม path ในคำสั่ง (${command}) — ตรวจ BMAD_STUDIO_RESOLVER_PROJECT ก่อนใช้ข้อเสนอ`,
     guardsTitle: "ข้อเสนอแก้ guard ของ agent",
     guardsIntro: "agent ที่ hard-code guard ของขั้นที่ flow ปิดได้ (เช่น designReady) — เสนอให้อ้างผลของ resolver แทน",
     noGuards: "ไม่พบ agent ที่มี guard ตามรูปแบบที่ตรวจ",
     guardLine: (line: number) => `บรรทัด ${line}`,
     guardStage: (stage: string) => `· ขั้น ${stage}`,
-    guardState: { suggested: "เสนอแก้", applied: "อ้าง resolver แล้ว" },
+    guardState: { suggested: "เสนอแก้", manual: "ต้องแยกเงื่อนไขเอง", applied: "อ้าง resolver แล้ว" },
+    guardManual: (gates: string) =>
+      `ข้อนี้มีเงื่อนไขของ gate อื่นปนอยู่ (${gates}) — แอปไม่เสนอข้อความยกเว้น เพราะจะทำให้ gate นั้นถูกข้ามไปด้วย แยก designReady ออกเป็นข้อของตัวเองก่อน`,
     guardReadOnly: "ดูได้อย่างเดียว — แอปยังไม่บันทึกไฟล์ agent (การแก้ agent ผ่านแอปมาในรุ่นถัดไป) คัดลอกไปแก้เองที่ .claude/agents",
   },
   changes: {

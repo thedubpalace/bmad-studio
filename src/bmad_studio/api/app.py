@@ -98,7 +98,7 @@ def _build_pipeline(settings: Settings) -> WritePipeline:
     root = Path(settings.veda_root or ".")
     paths = VedaPaths(root)
     kinds: dict = {"revert": RevertKind(state), "flow": FlowKind(paths), "flow-default": FlowDefaultKind(paths),
-                   "claude-md": claude_md.ClaudeMdKind(paths)}
+                   "claude-md": claude_md.ClaudeMdKind(paths, settings.resolver_project)}
     if settings.enable_text_kind:
         kinds["text"] = TextKind()
     return WritePipeline(PathGuard(root), state, settings.session_secret_value(), kinds,
