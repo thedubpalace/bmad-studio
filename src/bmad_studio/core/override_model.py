@@ -141,27 +141,11 @@ def type_mismatches(surface: Mapping[str, Any], override: Mapping[str, Any]) -> 
     return sorted(out)
 
 
-_FILE_FACT = re.compile(r"\s*file:(.*)", re.DOTALL)
-
-
-def file_facts(data: Mapping[str, Any]) -> tuple[list[str], list[str]]:
-    """รายการ ``file:`` ใน ``persistent_facts`` (ทุกระดับ) → (ทั้งหมด, ที่ชี้ออกนอก project root).
-    ออกนอก = มี ``..``, path absolute/ไดรฟ์/UNC, หรือไม่ขึ้นต้นด้วย ``{project-root}`` และเป็น path แบบ absolute."""
-    entries, escaping = [], []
-    for path, value in cfg.leaves(data).items():
-        if not path or cfg._norm_key(path[-1]) != "persistentfacts" or not isinstance(value, list):
-            continue
-        for item in value:
-            match = _FILE_FACT.match(item) if isinstance(item, str) else None
-            if not match:
-                continue
-            target = match.group(1).strip().replace("\\", "/")
-            entries.append(item)
-            rest = target[len("{project-root}"):] if target.startswith("{project-root}") else target
-            if (".." in rest.split("/") or rest.startswith("//") or re.match(r"^[A-Za-z]:", rest)
-                    or (rest.startswith("/") and not target.startswith("{project-root}"))):
-                escaping.append(item)
-    return entries, escaping
+def file_facts(data: Mapping[str, Any]) -> list[str]:
+    """รายการ ``file:`` ใน ``persistent_facts`` (prefix ไม่สนตัวพิมพ์หลัง NFKC) — สำหรับคำเตือนว่าเนื้อไฟล์จะเป็น fact;
+    ความถูกต้องของ path ตรวจที่ :func:`config_model.path_issues` (validator ของ rule ทุก kind)."""
+    return [where + ": file:" + value for where, value in cfg.path_values(data) if where.split(".")[-1] and
+            cfg._norm_key(where.split(".")[-1]) == "persistentfacts"]
 
 
 def _outside_issue(keys: list[str]) -> Issue:
@@ -191,7 +175,7 @@ def advisory(scripts: BmadScripts) -> Any:
         if mismatched:
             out.append(cfg.issue("override_type_mismatch", "ค่าบางค่าคนละชนิดกับ default ของ skill — BMAD จะใช้ค่านี้แทนทั้งค่า",
                                  keys=mismatched[:cfg.MAX_LISTED]))
-        facts, _escaping = file_facts(data)
+        facts = file_facts(data)
         if facts:
             out.append(cfg.issue("persistent_facts_file", "persistent_facts อ้างไฟล์ (file:) — เนื้อไฟล์ที่ตรงกับ glob จะกลายเป็น "
                                  "fact ของ agent ทุกครั้งที่เริ่ม skill และการแก้ไฟล์เหล่านั้นภายหลังจะไม่ผ่านหน้านี้",
@@ -205,12 +189,6 @@ def resolve_issues(scripts: BmadScripts, rel: str, proposed: bytes) -> list[Issu
     target = target_of(rel.lower())
     if target is None:
         return []
-    data, problem = cfg.parse_bytes(proposed)
-    if problem is None:
-        _facts, escaping = file_facts(data)
-        if escaping:  # fail closed: เนื้อไฟล์นอก veda (เช่น .runtime ของแอป) จะกลายเป็นคำสั่งของ agent
-            return [cfg.issue("persistent_facts_outside_root", "persistent_facts อ้างไฟล์นอก project root — บันทึกไม่ได้",
-                              keys=escaping[:cfg.MAX_LISTED])]
     if load_surface(scripts, target[0]) is None:
         return []
     try:

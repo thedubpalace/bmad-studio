@@ -135,6 +135,8 @@ def validate_toml(proposed: bytes) -> list[Issue]:
     hidden = hidden_characters(proposed.decode("utf-8"))
     # escape ใน TOML ("​", "\u0007") ไม่ปรากฏเป็นอักขระดิบในไฟล์ แต่ค่าที่ BMAD ส่งให้ agent มี — ตรวจค่าที่ parse แล้วด้วย
     hidden += [f"{dotted(path)} U+{ord(ch):04X}" for path, ch in _hidden_in_values(data or {})][:MAX_LISTED]
+    if not hidden:
+        return path_issues(data or {})
     if hidden:
         return [issue("hidden_characters", "มีอักขระที่มองไม่เห็นหรือสลับทิศการแสดงผล (เช่น zero-width, bidi, tag) — "
                                            "ผู้ตรวจ diff มองไม่เห็นข้อความจริง ลบออกก่อนบันทึก", keys=hidden)]
@@ -261,6 +263,74 @@ def classify(rel: str, current: bytes | None, proposed: bytes | None) -> tuple[s
         "การแก้นี้เปลี่ยนข้อความ ชื่อคีย์ ชนิดค่า หรือ comment ใน config/override ซึ่ง BMAD ส่งให้ agent อ่าน "
         "— ตรวจว่าไม่มีคำสั่งแฝงก่อนยืนยัน", keys=shown(rest)))
     return "high", warnings
+
+
+# -- path ที่ BMAD โหลด (review 6-3 B1 — allowlist ไม่ใช่ denylist) ---------------------------------------------
+
+#: placeholder ที่ขึ้นต้น path ได้ — ทุกตัวชี้ในโฟลเดอร์ veda/skill (BMAD แทนค่าเป็น path ใต้ project root)
+ROOT_PLACEHOLDERS = frozenset({"project-root", "skill-root", "planning_artifacts", "implementation_artifacts",
+                               "output_folder", "project_knowledge"})
+#: placeholder กลาง path ที่ BMAD แทนด้วยชื่อ (ไม่ใช่ path) — ใช้ได้ในชื่อไฟล์/โฟลเดอร์
+NAME_PLACEHOLDERS = frozenset({"project_name", "date", "topic_slug", "slug", "research_type", "spec_file"})
+_PATH_KEY = re.compile(r"(path|dir|folder|template|file|filename|pattern|artifacts|knowledge|examples)$")
+_FACT_PREFIX = re.compile(r"file:", re.IGNORECASE)
+_PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
+_SEGMENT_CHAR = re.compile(r"[\w.\-*?]", re.UNICODE)
+
+
+def _path_problem(raw: str) -> str | None:
+    """เหตุผลที่ path ไม่ผ่าน (None = ผ่าน): หลัง NFKC ต้องเป็น path สัมพัทธ์ หรือ ``{root-placeholder}/<สัมพัทธ์>``;
+    ห้าม ``~ % $``, ไดรฟ์, absolute, UNC, ``..``/``.``, ส่วนที่ลงท้ายด้วยจุด/ช่องว่าง, placeholder ที่ไม่รู้จัก."""
+    value = unicodedata.normalize("NFKC", raw).strip().replace("\\", "/")
+    if not value:
+        return None
+    parts = value.split("/")
+    first = _PLACEHOLDER.fullmatch(parts[0])
+    if first and first.group(1).lower() in ROOT_PLACEHOLDERS:
+        parts = parts[1:]  # placeholder ชื่อ (เช่น {slug}) ตรวจเป็นชื่อส่วนหนึ่งด้านล่าง
+    if value.startswith("/") or re.match(r"^[A-Za-z]:", value):
+        return "absolute"
+    for index, part in enumerate(parts):
+        if part in ("", ".", ".."):
+            if part == "" and index == len(parts) - 1:
+                continue  # "/" ท้าย path
+            return "dot_segment"
+        if part[-1] in ". " or part[0] == " ":
+            return "trailing_dot_space"
+        for name in _PLACEHOLDER.findall(part):
+            if name.lower() not in NAME_PLACEHOLDERS:
+                return "placeholder"
+        stripped = _PLACEHOLDER.sub("x", part)
+        if any(not _SEGMENT_CHAR.fullmatch(ch) for ch in stripped):
+            return "character"
+    return None
+
+
+def path_values(data: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """(ตำแหน่ง, path) ทุกค่าที่ BMAD โหลดเป็น path: key ชื่อแบบ *path/dir/folder/template/file/pattern/... และ
+    รายการ ``file:`` ใน persistent_facts (ตรวจ prefix แบบไม่สนตัวพิมพ์หลัง NFKC)."""
+    out: list[tuple[str, str]] = []
+    for path, value in leaves(data).items():
+        key = _norm_key(path[-1]) if path else ""
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            if not isinstance(item, str):
+                continue
+            norm = unicodedata.normalize("NFKC", item).lstrip()
+            if key == "persistentfacts":
+                if _FACT_PREFIX.match(norm):
+                    out.append((dotted(path), norm[len("file:"):]))
+            elif _PATH_KEY.search(key):
+                out.append((dotted(path), item))
+    return out
+
+
+def path_issues(data: Mapping[str, Any]) -> list[Issue]:
+    bad = [f"{where}: {value.strip()[:80]}" for where, value in path_values(data) if _path_problem(value)]
+    if not bad:
+        return []
+    return [issue("path_outside_root", "path ที่ BMAD จะโหลดต้องเป็น path สัมพัทธ์ใน veda หรือขึ้นต้นด้วย {project-root}/ "
+                                       "(ห้าม ~ % $ .. absolute ไดรฟ์ และ placeholder ที่ไม่รู้จัก)", keys=bad[:MAX_LISTED])]
 
 
 def impact_rules() -> dict[str, Callable[[str, bytes | None, bytes | None], tuple[str, list[Issue]]]]:

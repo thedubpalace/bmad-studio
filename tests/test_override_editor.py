@@ -272,14 +272,55 @@ def test_type_mismatch_is_warned(studio: Studio) -> None:
     assert mismatch["keys"] == ["workflow.max_rounds", "workflow.strict"]
 
 
-@pytest.mark.parametrize("fact", ["file:../../secrets/*", "file:C:/Users/x/.ssh/*", "file://server/share/x",
-                                  "file:{project-root}/../bmad-studio/.runtime/previews/*.bin", "file:/etc/*",
-                                  "file:..\\\\outside\\\\*"])
+OUTSIDE_FACTS = [
+    "file:../../secrets/*", "file:C:/Users/x/.ssh/*", "file://server/share/x",
+    "file:{project-root}/../bmad-studio/.runtime/previews/*.bin", "file:/etc/*", "file:..\\\\outside\\\\*",
+    # rework round 1 (review 6-3 B1): denylist เดิมหลุด
+    "file:~/.ssh/id_rsa", "file:%USERPROFILE%/secret.md", "file:$HOME/x.md", "file:{user-home}/x",
+    "file:{project-root}/.. /x", "file:{project-root}/．．/x", "FILE:../../etc/passwd", "File:/etc/passwd",
+    "ｆｉｌｅ:~/x", " file:/etc/x", "file:{project-root}/docs/{user}/x", "file:docs/a`b",
+]
+
+
+@pytest.mark.parametrize("fact", OUTSIDE_FACTS)
 def test_persistent_facts_file_outside_root_is_blocked(studio: Studio, root: Path, fact: str) -> None:
     data = preview(studio, TEAM, {"set": [{"path": ["workflow", "persistent_facts"], "value": [fact]}]},
                    None).json()["data"]
-    assert "persistent_facts_outside_root" in [e["code"] for e in data["errors"]], fact
+    assert "path_outside_root" in [e["code"] for e in data["errors"]], fact
     assert studio.commit(data, typed="bmad-build.toml").status_code == 422
+    assert not (root / TEAM).exists()
+
+
+@pytest.mark.parametrize(("key", "value"), [
+    ("spec_template", "~/evil.md"), ("spec_output_path", "{project-root}/../out"), ("methods_file", "C:/x.csv"),
+    ("run_folder_pattern", "{home}/x"), ("design_md_examples", ["ok/a.md", "../b.md"]),
+])
+def test_other_path_fields_use_the_same_allowlist(studio: Studio, key: str, value) -> None:
+    from bmad_studio.core import config_model as cfg
+
+    assert [i["code"] for i in cfg.validate_toml(f'[workflow]\n{key} = {__import__("json").dumps(value)}\n'.encode())] \
+        == ["path_outside_root"]
+
+
+@pytest.mark.parametrize("ok", ["{project-root}/docs/*.md", "docs/a.md", "{planning_artifacts}/briefs",
+                                "brainstorm-{topic_slug}-{date}", "{skill-root}/assets/methods.csv", ""])
+def test_paths_inside_root_pass(ok: str) -> None:
+    from bmad_studio.core import config_model as cfg
+
+    assert cfg.validate_toml(f'[workflow]\nspec_output_path = "{ok}"\n'.encode()) == []
+
+
+def test_real_installed_customize_defaults_pass_the_path_check() -> None:
+    from bmad_studio.core import config_model as cfg
+
+    from .bmadkit import REAL_VEDA
+
+    files = sorted((REAL_VEDA / ".claude" / "skills").glob("*/customize.toml"))
+    if not files:
+        pytest.skip("real veda skills not available")
+    for path in files:  # อ่านอย่างเดียว
+        data, problem = cfg.parse_bytes(path.read_bytes())
+        assert problem is None and cfg.path_issues(data) == [], path.parent.name
 
 
 @needs_uv
