@@ -90,7 +90,7 @@ describe("FlowEditor (story 4-2)", () => {
       if (url === "/api/agents/names") {
         return json(200, { ok: true, data: ["ba", "project-bootstrapper", "ux-designer", "architect", "developer", "devops", "reviewer"].map((name) => ({ name, description: "" })) });
       }
-      if (url === "/api/skills") return json(200, { ok: true, data: [{ id: "bmad-build", description: "" }, { id: "bmad-architecture", description: "" }] });
+      if (url === "/api/skills?usage=0") return json(200, { ok: true, data: [{ id: "bmad-build", description: "" }, { id: "bmad-architecture", description: "" }] });
       if (url === "/api/flows/demo/validate") {
         if (failValidate) return json(503, { ok: false, code: "x", error: "x" });
         const draft = JSON.parse(String(init?.body)).flow as Draft;
@@ -181,6 +181,29 @@ describe("FlowEditor (story 4-2)", () => {
     await render("/p/demo/flow?track=quick&stage=develop");
     expect(byText("quick").getAttribute("aria-pressed")).toBe("true");
     expect(container.querySelector(".inspector")?.textContent).toContain("develop");
+  });
+
+  it("skill picker lists /api/skills?usage=0 and binds the chosen skill (review 6-2 N1)", async () => {
+    await render("/p/demo/flow?track=full&stage=develop");
+    const select = Array.from(container.querySelectorAll<HTMLSelectElement>(".inspector select"))
+      .find((s) => Array.from(s.options).some((o) => o.value === "bmad-build"))!;
+    expect(select).toBeTruthy();
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(["", "bmad-build", "bmad-architecture"]);
+    expect(select.value).toBe("bmad-build");
+    await act(async () => {
+      select.value = "bmad-architecture";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(row("develop").textContent).toContain("bmad-architecture");
+  });
+
+  it("a stage bound to a skill without a folder shows it as not found", async () => {
+    view = makeView();
+    view.tracks.full.stages = view.tracks.full.stages.map((s) => (s.id === "develop" ? { ...s, skill: "bmad-ghost" } : s));
+    await render("/p/demo/flow?track=full&stage=develop");
+    const inspector = container.querySelector(".inspector")!;
+    expect(inspector.textContent).toContain("ไม่พบ skill นี้ใน .claude/skills");
+    expect(Array.from(inspector.querySelectorAll("option")).map((o) => o.textContent)).toContain("bmad-ghost (ไม่พบ)");
   });
 
   it("a crafted ?track= (prototype name) falls back instead of crashing", async () => {
@@ -425,7 +448,7 @@ describe("FlowEditor inspector and edge cases (review 4-2)", () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       if (url === "/api/flows/demo") return json(200, { ok: true, data: view });
       if (url === "/api/agents/names") return json(200, { ok: true, data: [{ name: "ba", description: "" }, { name: "devops", description: "" }] });
-      if (url === "/api/skills") return json(200, { ok: true, data: [{ id: "bmad-build", description: "" }] });
+      if (url === "/api/skills?usage=0") return json(200, { ok: true, data: [{ id: "bmad-build", description: "" }] });
       if (url === "/api/flows/demo/validate") {
         if (failValidate) return json(503, { ok: false, code: "x", error: "x" });
         validateBodies.push(JSON.parse(String(init?.body)).flow);

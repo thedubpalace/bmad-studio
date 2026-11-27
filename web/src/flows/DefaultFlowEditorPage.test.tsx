@@ -54,7 +54,7 @@ describe("DefaultFlowEditorPage (story 4-3)", () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       if (url === "/api/flow-default") return json(200, { ok: true, data: view });
       if (url === "/api/agents/names") return json(200, { ok: true, data: [{ name: "ba", description: "" }, { name: "developer", description: "" }] });
-      if (url === "/api/skills") return json(200, { ok: true, data: [] });
+      if (url === "/api/skills?usage=0") return json(200, { ok: true, data: [] });
       if (url === "/api/flow-default/validate") {
         const draft = JSON.parse(String(init?.body)).flow;
         const devOff = !draft.tracks.full.stages.find((s: { id: string }) => s.id === "develop").enabled;
