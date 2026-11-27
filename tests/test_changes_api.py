@@ -71,6 +71,7 @@ def generic_studio(settings: Settings) -> Studio:
     studio = Studio(settings)
     studio.app.state.writes.impact_rules.clear()
     studio.app.state.writes.path_validators.clear()
+    studio.app.state.writes.rule_max_bytes.clear()  # เพดาน 128 KiB ของ _bmad/custom (rework) — test ของตัวเองแยก
     return studio
 
 
