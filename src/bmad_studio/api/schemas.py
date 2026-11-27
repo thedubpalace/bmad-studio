@@ -583,3 +583,46 @@ class ConfigView(BaseModel):
 class ConfigViewEnvelope(BaseModel):
     ok: Literal[True]
     data: ConfigView
+
+
+# -- override ของ skill (REQ-041, story 6-3) — คำนวณใน core.override_model ------------------------------------
+
+class OverrideFieldHas(BaseModel):
+    team: bool
+    user: bool
+    effective: bool
+
+
+class OverrideField(BaseModel):
+    key: str
+    id: str
+    path: list[str]
+    rule: Literal["replace", "append", "keyed"]
+    keyedBy: str | None = None
+    type: Literal["string", "number", "boolean", "list", "complex"]
+    default: Any | None = None
+    instruction: bool
+    team: Any | None = None
+    user: Any | None = None
+    effective: Any | None = None
+    has: OverrideFieldHas
+
+
+class OverrideOutside(BaseModel):
+    team: list[str]
+    user: list[str]
+
+
+class SkillOverride(BaseModel):
+    skill: str
+    targets: ConfigTargets
+    layers: ConfigLayers
+    fields: list[OverrideField]
+    outside: OverrideOutside
+    effectiveAvailable: bool
+    issues: list[Issue] = []
+
+
+class SkillOverrideEnvelope(BaseModel):
+    ok: Literal[True]
+    data: SkillOverride

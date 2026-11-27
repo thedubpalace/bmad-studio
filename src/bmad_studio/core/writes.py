@@ -454,7 +454,12 @@ class WritePipeline:
                         "รายชื่อโปรเจกต์ที่การแก้นี้จะปิดขั้นออกแบบ UI เปลี่ยนไปหลังตัวอย่าง — ไม่มีอะไรถูกเขียน "
                         "เปิดตัวอย่างใหม่แล้วยืนยันอีกครั้ง", 409, {"projects": grown})
                 if "acknowledged" in extra:
-                    late = ack_errors(advice, list(extra.get("acknowledged") or []))
+                    acknowledged = list(extra.get("acknowledged") or [])
+                    late = ack_errors(advice, acknowledged)
+                    if any(w.get("code") == "override_outside_surface" for w in advice) \
+                            and "override_outside_surface" not in acknowledged:
+                        late = late + [{"code": "override_outside_surface_unconfirmed",
+                                        "error": "มี key นอกพื้นผิวที่ปรับได้ (customize.toml เปลี่ยนหลังตัวอย่าง) — เปิดตัวอย่างใหม่"}]
             if not late and meta.get("impact") != "high" and self._impact(guarded, original, None if delete else proposed)[0] == "high":
                 # impact ตามเนื้อหาต้องไม่สูงกว่าที่ผู้ใช้ยืนยันไว้ (กันข้าม typed confirmation)
                 raise StudioError("impact_changed", "การแก้นี้ต้องยืนยันแบบพิมพ์ชื่อไฟล์ — เปิดตัวอย่างใหม่", 409)

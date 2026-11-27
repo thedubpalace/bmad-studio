@@ -1,12 +1,13 @@
 // /bmad/skills/<id> — "ใช้ใน" (ลิงก์ไปขั้นของ flow) + SKILL.md อ่านอย่างเดียว (REQ-051 b: ไม่มี UI แก้/ลบ)
 import { useCallback, useEffect, useId, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 
 import { api, ApiError } from "../api/client";
 import type { SkillDetail as Detail } from "../api/types";
 import { Icon } from "../components/Icon";
 import { th } from "../i18n/th";
 import { BmadNav } from "./BmadNav";
+import { OverrideEditor } from "./OverrideEditor";
 import { stageLink } from "./SkillCatalog";
 
 type State = { kind: "loading" } | { kind: "ready"; data: Detail } | { kind: "error"; message: string; notFound: boolean };
@@ -16,6 +17,8 @@ export function SkillDetail({ children }: { children?: (data: Detail) => React.R
   const [state, setState] = useState<State>({ kind: "loading" });
   const [showMd, setShowMd] = useState(false);
   const mdId = useId();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") === "override" ? "override" : "detail";
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
@@ -61,6 +64,16 @@ export function SkillDetail({ children }: { children?: (data: Detail) => React.R
         <Link className="back-link" to="/bmad/skills">← {th.skills.back}</Link>
         <h2 id="skill-title" className="section-title mono">{data.id}</h2>
         <p className="item__desc skill-detail__desc">{data.description || th.bmad.noDescription}</p>
+        {data.customizable ? (
+          <div className="segmented" role="tablist" aria-label={th.override.tabsLabel}>
+            {(["detail", "override"] as const).map((t) => (
+              <button key={t} type="button" role="tab" className="segmented__item" aria-selected={tab === t}
+                      aria-pressed={tab === t} onClick={() => setParams(t === "override" ? { tab: t } : {}, { replace: true })}>
+                {t === "override" ? th.override.tab : th.override.tabDetail}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <p className="item__tags">
           {data.overrideTeam ? <span className="tag tag--warn">{th.bmad.overrideTeam}</span> : null}
           {data.overrideUser ? <span className="tag tag--warn">{th.bmad.overrideUser}</span> : null}
@@ -103,6 +116,7 @@ export function SkillDetail({ children }: { children?: (data: Detail) => React.R
           ) : null}
         </div>
       </section>
+      {data.customizable && tab === "override" ? <OverrideEditor skill={data.id} /> : null}
       {children ? children(data) : null}
     </>
   );

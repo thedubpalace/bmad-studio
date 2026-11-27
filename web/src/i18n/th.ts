@@ -441,6 +441,33 @@ export const th = {
     notFound: "ไม่พบ skill นี้",
     back: "กลับไปที่รายการ skill",
   },
+  override: {
+    tab: "Override",
+    tabDetail: "รายละเอียด",
+    tabsLabel: "มุมมองของ skill",
+    title: "Override ของ skill",
+    lead: "ปรับเฉพาะค่าที่ skill เปิดให้ปรับใน customize.toml — เขียนลง _bmad/custom/<skill>.toml (team) หรือ .user.toml (personal); ไฟล์ต้นฉบับของ skill ไม่ถูกแก้",
+    ruleReplace: "แทนที่",
+    ruleAppend: "ต่อท้าย",
+    ruleKeyed: "แทนที่ตาม key",
+    ruleHelp: (rule: string, key: string) =>
+      rule === "append" ? "ค่าที่ใส่ต่อท้ายรายการ default (ไม่ลบของเดิม)"
+        : rule === "keyed" ? `รายการที่ ${key} ตรงกันถูกแทนที่ทั้งรายการ ที่เหลือต่อท้าย — แก้ในโหมดข้อความ`
+          : "ค่าที่ใส่แทนที่ค่า default ทั้งค่า",
+    instructionTag: "คำสั่งที่ agent รัน — ผลสูง",
+    instructionHelp: "ข้อความในช่องนี้กลายเป็นคำสั่งที่ agent รันทุกครั้งที่เริ่ม skill — บันทึกต้องพิมพ์ชื่อไฟล์ยืนยัน",
+    defaultLabel: "default:",
+    listPlaceholder: "หนึ่งรายการต่อบรรทัด",
+    fieldsLabel: "ฟิลด์ที่ปรับได้",
+    textHint: "key นอกพื้นผิวของ customize.toml ต้องยืนยันก่อนบันทึก; ข้อความทุกค่าถูกส่งให้ agent อ่าน",
+    outsideTitle: "มี key นอกพื้นผิวที่ปรับได้",
+    outsideBody: "BMAD อาจไม่ใช้ค่าเหล่านี้ หรือ skill อาจตีความต่างไป:",
+    outsideAck: "ยืนยันว่าตั้งใจใส่ key เหล่านี้",
+    existingOutside: (keys: string) => `ไฟล์นี้มี key นอกพื้นผิวอยู่แล้ว (${keys}) — ดู/แก้ในโหมดข้อความ`,
+    effectiveTitle: "ผลหลัง merge (ตอนนี้)",
+    effectiveHint: (file: string) => `จาก resolve_customization.py ของ BMAD — หลังกดตรวจสอบจะเห็นค่าที่เปลี่ยนเมื่อบันทึก ${file}`,
+    loadFailed: "โหลด override ของ skill ไม่ได้",
+  },
   effective: {
     title: "ผลหลังบันทึกบนเครื่องนี้ (จาก resolve script ของ BMAD)",
     beforeUnknown: "อ่านค่าที่ใช้อยู่ตอนนี้ไม่ได้ จึงบอกไม่ได้ว่าคีย์ใดเปลี่ยน",

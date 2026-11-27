@@ -52,7 +52,13 @@ def bmad_mirror(paths: VedaPaths, files: Mapping[str, bytes | None] | None = Non
                 entries = sorted(os.scandir(paths.bmad_custom_dir), key=lambda e: e.name)
             except OSError:
                 entries = []
-            tomls = [Path(e.path) for e in entries if e.name.endswith(".toml") and e.is_file(follow_symlinks=False)]
+            tomls = []
+            for e in entries:
+                if not e.name.lower().endswith(".toml"):
+                    continue
+                if not e.is_file(follow_symlinks=False):
+                    raise MirrorIncomplete(e.name)  # link/โฟลเดอร์ชื่อ .toml — BMAD อาจอ่านได้ แต่เราจำลองไม่ได้
+                tomls.append(Path(e.path))
             if len(tomls) > MAX_MIRROR_FILES:
                 raise MirrorIncomplete("too_many_files")
             sources += tomls

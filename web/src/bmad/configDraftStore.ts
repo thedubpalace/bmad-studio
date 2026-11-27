@@ -6,7 +6,7 @@ export type Scalar = string | number | boolean;
 
 /** ค่าในฟอร์ม: ตัวเลขเก็บเป็นข้อความดิบจนกว่าจะส่ง (พิมพ์ "1." ระหว่างทางได้) */
 export type Edit =
-  | { kind: "set"; path: string[]; value: Scalar; numeric?: boolean }
+  | { kind: "set"; path: string[]; value: Scalar | string[]; numeric?: boolean }
   | { kind: "unset"; path: string[] };
 
 export interface ConfigDraft {
@@ -17,9 +17,10 @@ export interface ConfigDraft {
   text: string | null;
 }
 
-const drafts = new Map<Layer, ConfigDraft>();
+// key = ชั้นของ config ("team"/"user") หรือ "override:<skill>:<layer>" ของ OverrideEditor
+const drafts = new Map<string, ConfigDraft>();
 
-export function loadConfigDraft(layer: Layer, base: string | null): ConfigDraft | null {
+export function loadConfigDraft(layer: string, base: string | null): ConfigDraft | null {
   const stored = drafts.get(layer);
   if (!stored) return null;
   if (stored.base !== base) {
@@ -29,7 +30,7 @@ export function loadConfigDraft(layer: Layer, base: string | null): ConfigDraft 
   return stored;
 }
 
-export function saveConfigDraft(layer: Layer, draft: ConfigDraft): void {
+export function saveConfigDraft(layer: string, draft: ConfigDraft): void {
   const dirty = Object.keys(draft.edits).length > 0 || draft.text !== null;
   if (dirty) drafts.set(layer, draft);
   else drafts.delete(layer);

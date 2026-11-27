@@ -19,6 +19,7 @@ import io
 import json
 import re
 import tomllib
+import unicodedata
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -71,10 +72,59 @@ def parse_bytes(raw: bytes) -> tuple[dict[str, Any] | None, Issue | None]:
     return data, None
 
 
+def _hidden(ch: str) -> bool:
+    """อักขระที่มองไม่เห็นหรือสลับทิศการแสดงผล — ซ่อนคำสั่งจากผู้ตรวจ diff ได้ (Cf: ZWSP/RLO/tag U+E00xx, Co, Cs,
+    control ยกเว้น tab/ขึ้นบรรทัด, Zl/Zp)."""
+    if ch in "\t\n\r":
+        return False
+    return unicodedata.category(ch) in {"Cf", "Co", "Cs", "Cc", "Zl", "Zp"}
+
+
+def hidden_characters(text: str) -> list[str]:
+    """ตำแหน่ง (บรรทัด:คอลัมน์ + code point) ของอักขระที่มองไม่เห็นในข้อความทั้งไฟล์ (สูงสุด MAX_LISTED)."""
+    found = []
+    for line_no, line in enumerate(text.split("\n"), 1):
+        for col, ch in enumerate(line, 1):
+            if _hidden(ch):
+                found.append(f"{line_no}:{col} U+{ord(ch):04X}")
+                if len(found) >= MAX_LISTED:
+                    return found
+    return found
+
+
+def _hidden_in_values(data: Any, path: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], str]]:
+    """(path, อักขระ) แรกที่ซ่อนอยู่ในชื่อ key หรือค่า string ทุกระดับ (รวมใน array/table ซ้อน)."""
+    out: list[tuple[tuple[str, ...], str]] = []
+    if isinstance(data, Mapping):
+        for key, value in data.items():
+            here = (*path, str(key))
+            bad = next((ch for ch in str(key) if _hidden(ch)), None)
+            if bad:
+                out.append((here, bad))
+            out += _hidden_in_values(value, here)
+    elif isinstance(data, list):
+        for item in data:
+            out += _hidden_in_values(item, path)
+    elif isinstance(data, str):
+        bad = next((ch for ch in data if _hidden(ch)), None)
+        if bad:
+            out.append((path, bad))
+    return out
+
+
 def validate_toml(proposed: bytes) -> list[Issue]:
-    """file validator ของ rule ``bmad-custom`` (ทุก kind รวม revert/text)."""
-    _data, problem = parse_bytes(proposed)
-    return [problem] if problem else []
+    """file validator ของ rule ``bmad-custom`` (ทุก kind รวม revert/text): TOML ที่ BMAD อ่านได้ และไม่มีอักขระที่
+    มองไม่เห็น/สลับทิศ (review 6-3: ข้อความที่ agent อ่านต้องเห็นครบใน diff ก่อนยืนยัน)."""
+    data, problem = parse_bytes(proposed)
+    if problem:
+        return [problem]
+    hidden = hidden_characters(proposed.decode("utf-8"))
+    # escape ใน TOML ("​", "\u0007") ไม่ปรากฏเป็นอักขระดิบในไฟล์ แต่ค่าที่ BMAD ส่งให้ agent มี — ตรวจค่าที่ parse แล้วด้วย
+    hidden += [f"{dotted(path)} U+{ord(ch):04X}" for path, ch in _hidden_in_values(data or {})][:MAX_LISTED]
+    if hidden:
+        return [issue("hidden_characters", "มีอักขระที่มองไม่เห็นหรือสลับทิศการแสดงผล (เช่น zero-width, bidi, tag) — "
+                                           "ผู้ตรวจ diff มองไม่เห็นข้อความจริง ลบออกก่อนบันทึก", keys=hidden)]
+    return []
 
 
 # -- leaf ของ TOML + การจัดชั้น impact --------------------------------------------------------------

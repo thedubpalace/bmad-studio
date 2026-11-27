@@ -29,7 +29,7 @@ from bmad_studio.api.routes import flows as flows_routes
 from bmad_studio.api.routes import projects as projects_routes
 from bmad_studio.api.routes import session as session_routes
 from bmad_studio.api.routes import web as web_routes
-from bmad_studio.core import claude_md, config_model
+from bmad_studio.core import claude_md, config_model, override_model
 from bmad_studio.core.credentials import CredentialStore
 from bmad_studio.core.errors import StartupError, StudioError
 from bmad_studio.core.path_guard import PathGuard
@@ -99,15 +99,16 @@ def _build_pipeline(settings: Settings, scripts: BmadScripts) -> WritePipeline:
     paths = VedaPaths(root)
     kinds: dict = {"revert": RevertKind(state), "flow": FlowKind(paths), "flow-default": FlowDefaultKind(paths),
                    "claude-md": claude_md.ClaudeMdKind(paths, settings.resolver_project),
-                   "config": config_model.ConfigKind(scripts)}
+                   "config": config_model.ConfigKind(scripts), "override": override_model.OverrideKind(scripts)}
     if settings.enable_text_kind:
         kinds["text"] = TextKind()
     return WritePipeline(PathGuard(root), state, settings.session_secret_value(), kinds,
                          validators={**file_validators(paths), **claude_md.file_validators(paths),
                                      config_model.RULE: config_model.validate_toml},
                          delete_validators={**delete_validators(paths), claude_md.RULE: claude_md.delete_issues},
-                         advisories=advisories(paths), impact_rules=config_model.impact_rules(),
-                         path_validators=config_model.path_validators(scripts))
+                         advisories=override_model.compose_advisories(advisories(paths), override_model.advisory(scripts)),
+                         impact_rules=config_model.impact_rules(),
+                         path_validators=override_model.path_validators(scripts))
 
 
 def create_app(settings: Settings | None = None, *, check: bool = True) -> FastAPI:

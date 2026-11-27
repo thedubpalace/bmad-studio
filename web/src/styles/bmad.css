@@ -296,3 +296,95 @@
   min-height: var(--target);
   align-self: flex-start;
 }
+
+/* override editor (story 6-3) — สองคอลัมน์บน desktop, แผงผลหลัง merge sticky */
+.override-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s-4);
+}
+
+@media (min-width: 960px) {
+  .override-layout {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .override-effective {
+    position: sticky;
+    top: var(--s-4);
+    max-height: calc(100vh - 2 * var(--s-4));
+    overflow: auto;
+  }
+}
+
+.override-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-width: 0;
+}
+
+.override-effective {
+  border-radius: var(--radius);
+  padding: var(--s-4);
+  min-width: 0;
+}
+
+.override-fields {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.override-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--glass-hairline);
+  min-width: 0;
+}
+
+.override-field:first-child {
+  border-top: 0;
+}
+
+.override-field__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.override-field__key {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.override-field__default {
+  font-size: var(--fs-14);
+  overflow-wrap: anywhere;
+}
+
+.override-field__area {
+  min-height: 5rem;
+  padding: var(--s-2) var(--s-3);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.override-field--instruction .override-field__key {
+  color: var(--warn);
+}
+
+.rule-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  font-size: var(--fs-14);
+  color: var(--text-2);
+  border: 1px solid var(--glass-hairline);
+  border-radius: 999px;
+  padding: 2px var(--s-2);
+}

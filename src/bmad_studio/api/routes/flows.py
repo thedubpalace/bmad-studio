@@ -19,10 +19,12 @@ from bmad_studio.api.schemas import (
     FlowDraftCheckEnvelope,
     FlowEditorEnvelope,
     SkillDetailEnvelope,
+    SkillOverrideEnvelope,
     SkillNameListEnvelope,
     SkillReferencesEnvelope,
 )
 from bmad_studio.core.catalog import agent_names
+from bmad_studio.core.override_model import override_view
 from bmad_studio.core.skill_catalog import missing_skills, skill_catalog, skill_detail
 from bmad_studio.core.flow.default_editor import check_default_draft, default_view
 from bmad_studio.core.flow.editor import check_draft, draft_result, editor_view
@@ -88,3 +90,9 @@ async def skill_references(request: Request) -> JSONResponse:
 async def get_skill(request: Request, skill: str) -> JSONResponse:
     """รายละเอียด skill + SKILL.md อ่านอย่างเดียว (ไม่มี API แก้/ลบ SKILL.md — REQ-051 b)."""
     return ok(await run_in_threadpool(skill_detail, _paths(request), skill))
+
+
+@router.get("/api/skills/{skill}/override", response_model=SkillOverrideEnvelope, responses=FLOW_ERRORS)
+async def get_skill_override(request: Request, skill: str) -> JSONResponse:
+    """ฟิลด์ที่ปรับได้จาก customize.toml + ค่า team/user + effective จาก resolve_customization.py (REQ-041)."""
+    return ok(await run_in_threadpool(override_view, request.app.state.bmad, skill))

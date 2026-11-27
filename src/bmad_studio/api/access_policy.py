@@ -67,6 +67,8 @@ RULES: list[Rule] = [
     *_rules(STUDIO_READ, "GET", "/api/bmad/config"),
     # skill catalog (REQ-051, story 6-2) — อ่านอย่างเดียว
     *_rules(STUDIO_READ, "GET", "/api/skills/{skill}", "/api/skill-references"),
+    # override ของ skill (REQ-041, story 6-3) — อ่านอย่างเดียว; เขียนผ่าน kind ``override`` ของ write pipeline
+    *_rules(STUDIO_READ, "GET", "/api/skills/{skill}/override"),
     # write pipeline (REQ-043, AD-5): preview แล้ว commit ด้วย confirm token
     *_rules(STUDIO_WRITE, "POST", "/api/changes/preview", "/api/changes/commit"),
     *_rules(STUDIO_READ, "GET", "/api/changes", "/api/changes/{change_id}"),

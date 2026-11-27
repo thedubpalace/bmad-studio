@@ -430,6 +430,32 @@ export interface NextStage {
   note?: string | null;
 }
 
+export interface OverrideField {
+  key: string;
+  id: string;
+  path: Array<string>;
+  rule: "replace" | "append" | "keyed";
+  keyedBy?: string | null;
+  type: "string" | "number" | "boolean" | "list" | "complex";
+  default?: unknown | null;
+  instruction: boolean;
+  team?: unknown | null;
+  user?: unknown | null;
+  effective?: unknown | null;
+  has: OverrideFieldHas;
+}
+
+export interface OverrideFieldHas {
+  team: boolean;
+  user: boolean;
+  effective: boolean;
+}
+
+export interface OverrideOutside {
+  team: Array<string>;
+  user: Array<string>;
+}
+
 export interface ProjectFlowError {
   code: string;
   source: string;
@@ -523,6 +549,21 @@ export interface SkillName {
 export interface SkillNameListEnvelope {
   ok: true;
   data: Array<SkillName>;
+}
+
+export interface SkillOverride {
+  skill: string;
+  targets: ConfigTargets;
+  layers: ConfigLayers;
+  fields: Array<OverrideField>;
+  outside: OverrideOutside;
+  effectiveAvailable: boolean;
+  issues?: Array<Issue>;
+}
+
+export interface SkillOverrideEnvelope {
+  ok: true;
+  data: SkillOverride;
 }
 
 export interface SkillReferences {

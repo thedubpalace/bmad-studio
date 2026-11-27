@@ -216,12 +216,67 @@ class BmadScripts:
                 raise
             data = exc
         with self._lock:
-            if len(self._proposed_cache) >= 32:
-                self._proposed_cache.pop(next(iter(self._proposed_cache)))
-            self._proposed_cache[key] = data
+            self._remember(key, data)
         if isinstance(data, BmadUnavailable):
             raise data
         return data
+
+    # -- customization ของ skill (story 6-3, AD-10) --------------------------------------------------
+    @property
+    def resolve_customization_script(self) -> Path:
+        return self.paths.bmad_scripts_dir / "resolve_customization.py"
+
+    def _customization_stamp(self, skill: str) -> tuple:
+        custom = self.paths.bmad_custom_dir
+        return self._stamp([self.paths.skills_dir / skill / "customize.toml", custom / f"{skill}.toml",
+                            custom / f"{skill}.user.toml", self.resolve_customization_script,
+                            self.paths.bmad_scripts_dir / "config_utils.py"])
+
+    def _run_customization(self, skill: str, root: Path) -> dict:
+        data = self.run_json(self.resolve_customization_script, "--skill", str(self.paths.skills_dir / skill),
+                             "--project-root", str(root))
+        if not isinstance(data, dict):
+            raise BmadUnavailable("bad_output", "ผลลัพธ์ของ resolve_customization.py ไม่ใช่ object")
+        return data
+
+    def resolve_customization(self, skill: str) -> dict:
+        """``resolve_customization.py --skill <dir> --project-root <VEDA_ROOT>`` (cache ตาม mtime ของ input)."""
+        key = ("current", skill, self._customization_stamp(skill))
+        with self._lock:
+            hit = self._proposed_cache.get(key)
+        if isinstance(hit, dict):
+            return hit
+        data = self._run_customization(skill, self.paths.root)
+        with self._lock:
+            self._remember(key, data)
+        return data
+
+    def resolve_customization_with(self, skill: str, rel: str, proposed: bytes) -> dict:
+        """effective ของ skill เมื่อแทน ``rel`` ด้วย ``proposed`` (mirror ชั่วคราว) — cache แบบเดียวกับ config."""
+        key = ("proposed", skill, rel.lower(), hashlib.sha256(proposed).hexdigest(), self._customization_stamp(skill))
+        with self._lock:
+            hit = self._proposed_cache.get(key)
+        if isinstance(hit, BmadUnavailable):
+            raise hit
+        if hit is not None:
+            return hit
+        try:
+            with self.mirror({rel: proposed}) as root:
+                data: dict | BmadUnavailable = self._run_customization(skill, root)
+        except BmadUnavailable as exc:
+            if exc.reason in {"timeout", "uv_missing", "mirror_failed"}:
+                raise
+            data = exc
+        with self._lock:
+            self._remember(key, data)
+        if isinstance(data, BmadUnavailable):
+            raise data
+        return data
+
+    def _remember(self, key: tuple, data: object) -> None:
+        if len(self._proposed_cache) >= 64:
+            self._proposed_cache.pop(next(iter(self._proposed_cache)))
+        self._proposed_cache[key] = data
 
     def resolve_config(self) -> dict:
         """ผลของ ``resolve_config.py --project-root <VEDA_ROOT>`` (cache ตาม mtime ของ input)."""

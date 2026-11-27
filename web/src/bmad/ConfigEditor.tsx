@@ -114,7 +114,7 @@ function formPayload(edits: Record<string, Edit>): { payload: { set: unknown[]; 
       unset.push(edit.path);
       continue;
     }
-    let value: Scalar = edit.value;
+    let value: Scalar | string[] = edit.value;
     if (edit.numeric) {
       const raw = String(edit.value).trim();
       const n = Number(raw);
