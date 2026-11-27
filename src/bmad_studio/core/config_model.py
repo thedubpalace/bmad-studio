@@ -72,11 +72,25 @@ def parse_bytes(raw: bytes) -> tuple[dict[str, Any] | None, Issue | None]:
     return data, None
 
 
+#: Default_Ignorable_Code_Point ทั้งหมดของ Unicode (DerivedCoreProperties) — รวม variation selector (FE00–FE0F,
+#: E0100–E01EF), CGJ 034F, Hangul filler 115F/1160/3164/FFA0, Khmer 17B4–17B5, Mongolian FVS 180B–180F, tag E00xx
+#: + อักขระว่างที่ไม่ ignorable แต่มองไม่เห็น (braille blank 2800) — review 6-3 B2
+_IGNORABLE_RANGES: tuple[tuple[int, int], ...] = (
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5), (0x180B, 0x180F),
+    (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+    (0x2800, 0x2800),
+)
+
+
 def _hidden(ch: str) -> bool:
-    """อักขระที่มองไม่เห็นหรือสลับทิศการแสดงผล — ซ่อนคำสั่งจากผู้ตรวจ diff ได้ (Cf: ZWSP/RLO/tag U+E00xx, Co, Cs,
-    control ยกเว้น tab/ขึ้นบรรทัด, Zl/Zp)."""
+    """อักขระที่มองไม่เห็นหรือสลับทิศการแสดงผล — ซ่อนคำสั่งจากผู้ตรวจ diff ได้: Default_Ignorable_Code_Point ทุกตัว,
+    Cf/Co/Cs, control ยกเว้น tab/ขึ้นบรรทัด, Zl/Zp."""
     if ch in "\t\n\r":
         return False
+    code = ord(ch)
+    if any(lo <= code <= hi for lo, hi in _IGNORABLE_RANGES):
+        return True
     return unicodedata.category(ch) in {"Cf", "Co", "Cs", "Cc", "Zl", "Zp"}
 
 

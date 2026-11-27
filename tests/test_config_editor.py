@@ -408,3 +408,27 @@ def test_comment_digit_edit_through_the_api_needs_typed_confirm(settings: Settin
     data = preview(studio, TEAM, {"text": "[core]\nmax_rounds = 4 # run 9 step\n"}, team_sha(root), kind="text").json()["data"]
     assert data["impact"] == "high"
     assert studio.commit(data).status_code == 400
+
+
+# -- rework round 1: 6-3 B2 — อักขระ Default_Ignorable_Code_Point ทุกกลุ่ม --------------------------------------
+
+HIDDEN_GROUPS = {
+    "variation-selector": "\ufe0f", "variation-selector-supplement": "\U000e0100", "hangul-filler": "\u3164",
+    "hangul-choseong-filler": "\u115f", "halfwidth-hangul-filler": "\uffa0", "cgj": "\u034f", "braille-blank": "\u2800",
+    "khmer-inherent": "\u17b4", "mongolian-fvs": "\u180b", "soft-hyphen": "\u00ad", "arabic-letter-mark": "\u061c",
+    "zwsp": "\u200b", "rlo": "\u202e", "word-joiner": "\u2060", "invisible-times": "\u2062", "bom": "\ufeff",
+    "tag": "\U000e0041", "musical-symbol-format": "\U0001d173", "shorthand-format": "\U0001bca0",
+}
+
+
+@pytest.mark.parametrize("group", sorted(HIDDEN_GROUPS))
+@pytest.mark.parametrize("where", ["value", "key", "comment"])
+def test_every_default_ignorable_group_is_rejected(group: str, where: str) -> None:
+    ch = HIDDEN_GROUPS[group]
+    text = {"value": f'x = "a{ch}b"\n', "key": f'"k{ch}" = 1\n', "comment": f"# c{ch}\nx = 1\n"}[where]
+    issues = cfg.validate_toml(text.encode("utf-8"))
+    assert [i["code"] for i in issues] == ["hidden_characters"], (group, where, issues)
+
+
+def test_visible_thai_and_emoji_text_is_allowed() -> None:
+    assert cfg.validate_toml('x = "ภาษาไทย ✓ ok"\n'.encode("utf-8")) == []
