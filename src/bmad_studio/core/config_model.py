@@ -483,7 +483,11 @@ def proposed_text(current: fs.TextDoc, payload: Mapping[str, Any]) -> tuple[str,
         text = payload["text"]
         if len(text) > fs.MAX_BYTES:
             raise StudioError("file_too_large", "ไฟล์ใหญ่เกินกว่าที่สตูดิโอแก้ได้", 413)
-        return fs.to_lf(text), []
+        new_text = fs.to_lf(text)
+        lost = sum((Counter(comments(current.text)) - Counter(comments(new_text))).values())
+        # โหมดข้อความก็เตือน comment ที่หาย (AD-6, review 6-1 N4)
+        return new_text, ([issue("comments_dropped", f"comment ในไฟล์เดิม {lost} รายการจะหายไป — ตรวจใน diff ก่อนบันทึก")]
+                          if lost > 0 else [])
     if not keys or keys - {"set", "unset"}:
         raise StudioError("invalid_request", "ต้องส่ง payload.set/unset หรือ payload.text", 422)
     sets, unsets = payload.get("set", []), payload.get("unset", [])
@@ -597,7 +601,8 @@ def resolve_issues(scripts: BmadScripts, rel: str, proposed: bytes) -> list[Issu
     if rel.lower() not in CONFIG_TARGETS:
         return []
     try:
-        scripts.resolve_config_with(rel, proposed)
+        # ตัวสะกดมาตรฐาน (CONFIG.toml → config.toml) — mirror แทนไฟล์ที่ BMAD อ่านจริง (review 6-1 N2)
+        scripts.resolve_config_with(rel.lower(), proposed)
     except BmadUnavailable as exc:
         return [_resolve_issue(exc)]
     return []

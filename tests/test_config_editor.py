@@ -432,3 +432,16 @@ def test_every_default_ignorable_group_is_rejected(group: str, where: str) -> No
 
 def test_visible_thai_and_emoji_text_is_allowed() -> None:
     assert cfg.validate_toml('x = "ภาษาไทย ✓ ok"\n'.encode("utf-8")) == []
+
+
+@needs_uv
+def test_text_mode_also_warns_about_dropped_comments(studio: Studio, root: Path) -> None:
+    data = preview(studio, TEAM, {"text": TEAM_TOML.replace(" # ภาษาเอกสาร", "")}, team_sha(root)).json()["data"]
+    assert "comments_dropped" in [w["code"] for w in data["warnings"]]
+
+
+def test_mirror_stamp_tracks_upper_case_toml(root: Path) -> None:
+    scripts = BmadScripts(VedaPaths(root))
+    before = scripts._mirror_stamp()
+    (root / "_bmad/custom/extra.TOML").write_text("x = 1\n", encoding="utf-8")
+    assert scripts._mirror_stamp() != before

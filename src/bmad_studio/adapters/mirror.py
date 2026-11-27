@@ -40,7 +40,8 @@ def bmad_mirror(paths: VedaPaths, files: Mapping[str, bytes | None] | None = Non
     ``installer_only`` = ไม่คัด ``_bmad/custom`` (ค่า base ของ installer ล้วน ๆ).
     """
     bmad = paths.bmad_dir
-    with tempfile.TemporaryDirectory(prefix="bmad-studio-mirror-") as tmp:
+    # ลบไม่สำเร็จ (handle/AV บน Windows) ต้องไม่กลายเป็น 500 — review 6-1 N6
+    with tempfile.TemporaryDirectory(prefix="bmad-studio-mirror-", ignore_cleanup_errors=True) as tmp:
         root = Path(tmp)
         if _inside(root, paths.root) or _inside(paths.root, root):
             raise RuntimeError("temp mirror ต้องอยู่นอก VEDA_ROOT")

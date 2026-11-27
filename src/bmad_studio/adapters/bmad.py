@@ -191,12 +191,14 @@ class BmadScripts:
         return data
 
     def _mirror_stamp(self) -> tuple:
-        custom = self.paths.bmad_custom_dir
+        # ทุกไฟล์ที่ mirror คัด (นามสกุล .toml ทุกตัวพิมพ์ — ตรงกับ adapters.mirror, review 6-1 N1) + installer + script
+        custom, bmad, scripts = self.paths.bmad_custom_dir, self.paths.bmad_dir, self.paths.bmad_scripts_dir
         try:
-            names = sorted(e.name for e in os.scandir(custom) if e.name.endswith(".toml"))
+            names = sorted(e.name for e in os.scandir(custom) if e.name.lower().endswith(".toml"))
         except OSError:
             names = []
-        return self._stamp(self._config_inputs()[:2] + [custom / n for n in names] + self._config_inputs()[4:])
+        return self._stamp([bmad / "config.toml", bmad / "config.user.toml", *(custom / n for n in names),
+                            self.resolve_config_script, scripts / "config_utils.py"])
 
     def resolve_config_with(self, rel: str, proposed: bytes) -> dict:
         """effective เมื่อแทน ``rel`` (ใน ``_bmad/custom``) ด้วย ``proposed`` — cache ตาม (rel, sha, stamp ของทุก layer).
