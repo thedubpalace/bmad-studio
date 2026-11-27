@@ -325,6 +325,11 @@ export interface FlowModel {
   tracks: Record<string, FlowTrackModel>;
 }
 
+export interface FlowRef {
+  flow: string;
+  kind?: "default" | "project" | "projects-list";
+}
+
 export interface FlowSource {
   default: string;
   overlay?: string | null;
@@ -409,6 +414,12 @@ export interface LoginBody {
   password: string;
 }
 
+export interface MissingSkill {
+  id: string;
+  usedIn: Array<SkillUse>;
+  flowCount: number;
+}
+
 export interface NextStage {
   stage: string;
   agent: string;
@@ -467,6 +478,29 @@ export interface SessionEnvelope {
   data: SessionData;
 }
 
+export interface SkillDetail {
+  id: string;
+  description: string;
+  group?: "bmad" | "veda";
+  overrideTeam?: boolean;
+  overrideUser?: boolean;
+  customizable?: boolean;
+  flowCount?: number;
+  usageKnown?: boolean;
+  usedIn?: Array<SkillUse>;
+  skillMd: string;
+  skillMdTruncated: boolean;
+  skillMdLimit: number;
+  skillMdError?: "not_contained" | "unreadable" | null;
+  skillMdPath: string;
+  unreadable?: Array<FlowRef>;
+}
+
+export interface SkillDetailEnvelope {
+  ok: true;
+  data: SkillDetail;
+}
+
 export interface SkillItem {
   id: string;
   description: string;
@@ -477,11 +511,38 @@ export interface SkillItem {
 export interface SkillName {
   id: string;
   description: string;
+  group?: "bmad" | "veda";
+  overrideTeam?: boolean;
+  overrideUser?: boolean;
+  customizable?: boolean;
+  flowCount?: number;
+  usageKnown?: boolean;
+  usedIn?: Array<SkillUse>;
 }
 
 export interface SkillNameListEnvelope {
   ok: true;
   data: Array<SkillName>;
+}
+
+export interface SkillReferences {
+  missing: Array<MissingSkill>;
+  unreadable: Array<FlowRef>;
+  flows: number;
+  known?: boolean;
+}
+
+export interface SkillReferencesEnvelope {
+  ok: true;
+  data: SkillReferences;
+}
+
+export interface SkillUse {
+  flow: string;
+  kind?: "default" | "project";
+  track: string;
+  stage: string;
+  enabled: boolean;
 }
 
 export interface StageChip {

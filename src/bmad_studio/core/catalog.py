@@ -41,9 +41,3 @@ def agent_names(paths: VedaPaths, catalog: Catalog | None = None) -> list[dict[s
     catalog = catalog or Catalog.scan(paths)
     return [{"name": name, "description": _description(paths.agents_dir / f"{name}.md")}
             for name in sorted(catalog.agents) if _ok(name)]
-
-
-def skill_list(paths: VedaPaths, catalog: Catalog | None = None) -> list[dict[str, str]]:
-    catalog = catalog or Catalog.scan(paths)
-    return [{"id": name, "description": _description(paths.skills_dir / name / "SKILL.md")}
-            for name in sorted(catalog.skills) if _ok(name)]

@@ -23,6 +23,8 @@ MAY_NAME_REGISTRY = {
     SRC / "core" / "flow" / "editor.py",
     # story 4-3: ตรวจ overlay ทุกโปรเจกต์เมื่อ default เปลี่ยน (อ่านรายชื่อจาก read_registry อย่างเดียว)
     SRC / "core" / "flow" / "default_editor.py",
+    # story 6-2: skill catalog อ่านรายชื่อโปรเจกต์จาก read_registry อย่างเดียว และรายงาน "registry.json อ่านไม่ได้"
+    SRC / "core" / "skill_catalog.py",
 }
 WRITE_CALLS = {
     "open", "write_text", "write_bytes", "write", "replace", "rename", "dump", "touch", "unlink",

@@ -423,9 +423,64 @@ class AgentNameListEnvelope(BaseModel):
     data: list[AgentName]
 
 
+class SkillUse(BaseModel):
+    flow: str  # "default" หรือชื่อโปรเจกต์
+    kind: Literal["default", "project"] = "project"  # ชื่อโปรเจกต์ "default" ไม่ชนกับ flow เริ่มต้น
+    track: str
+    stage: str
+    enabled: bool
+
+
 class SkillName(BaseModel):
+    # field ของ story 4-1 (StageInspector) — รูปเดิม
     id: str
     description: str
+    # story 6-2 (REQ-051)
+    group: Literal["bmad", "veda"] = "bmad"
+    overrideTeam: bool = False
+    overrideUser: bool = False
+    customizable: bool = False
+    flowCount: int = 0
+    #: False = อ่าน flow เริ่มต้นไม่ได้หรือไม่ได้ขอ (``?usage=0``) — ห้ามแสดงว่า "ไม่ถูกใช้"
+    usageKnown: bool = False
+    usedIn: list[SkillUse] = []
+
+
+class FlowRef(BaseModel):
+    flow: str
+    kind: Literal["default", "project", "projects-list"] = "project"
+
+
+class SkillDetail(SkillName):
+    skillMd: str
+    skillMdTruncated: bool
+    skillMdLimit: int
+    skillMdError: Literal["not_contained", "unreadable"] | None = None
+    skillMdPath: str
+    unreadable: list[FlowRef] = []
+
+
+class SkillDetailEnvelope(BaseModel):
+    ok: Literal[True]
+    data: SkillDetail
+
+
+class MissingSkill(BaseModel):
+    id: str
+    usedIn: list[SkillUse]
+    flowCount: int
+
+
+class SkillReferences(BaseModel):
+    missing: list[MissingSkill]
+    unreadable: list[FlowRef]
+    flows: int
+    known: bool = True
+
+
+class SkillReferencesEnvelope(BaseModel):
+    ok: Literal[True]
+    data: SkillReferences
 
 
 class SkillNameListEnvelope(BaseModel):

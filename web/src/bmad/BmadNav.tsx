@@ -7,6 +7,7 @@ export function BmadNav() {
   const items: Array<[string, string, boolean]> = [
     ["/bmad", th.bmadNav.overview, true],
     ["/bmad/config", th.bmadNav.config, false],
+    ["/bmad/skills", th.bmadNav.skills, false],
   ];
   return (
     <nav className="bmad-nav" aria-label={th.bmadNav.label}>

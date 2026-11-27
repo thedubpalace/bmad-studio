@@ -126,10 +126,10 @@ describe("FlowEditor (story 4-2)", () => {
     wide = true;
   });
 
-  async function render() {
+  async function render(url = "/p/demo/flow") {
     await act(async () => {
       root.render(
-        <MemoryRouter initialEntries={["/p/demo/flow"]}>
+        <MemoryRouter initialEntries={[url]}>
           <Routes>
             <Route path="/p/:name/flow" element={<ProjectFlowEditorPage />} />
             <Route path="/changes/review" element={<Where />} />
@@ -175,6 +175,18 @@ describe("FlowEditor (story 4-2)", () => {
     const body = gate.querySelector(".flow-row__body") as HTMLElement;
     expect(document.getElementById(String(body.getAttribute("aria-describedby")).split(" ")[0])?.textContent).toContain(GATE_REASON);
     expect(gate.querySelector("a[href='https://example.test/review']")).toBeTruthy();
+  });
+
+  it("deep link from the skill catalog selects the track and opens the stage (story 6-2)", async () => {
+    await render("/p/demo/flow?track=quick&stage=develop");
+    expect(byText("quick").getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".inspector")?.textContent).toContain("develop");
+  });
+
+  it("a crafted ?track= (prototype name) falls back instead of crashing", async () => {
+    await render("/p/demo/flow?track=constructor&stage=develop");
+    expect(byText("full")).toBeTruthy();
+    expect(row("requirements-review")).toBeTruthy();
   });
 
   it("locks whatever stage the API marks locked — no hard-coded list", async () => {

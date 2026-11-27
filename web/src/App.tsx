@@ -8,6 +8,8 @@ import { EmptyState } from "./components/EmptyState";
 import { SessionExpiredModal } from "./components/SessionDialogs";
 import { th } from "./i18n/th";
 import { ConfigEditor } from "./bmad/ConfigEditor";
+import { SkillCatalog } from "./bmad/SkillCatalog";
+import { SkillDetail } from "./bmad/SkillDetail";
 import { BmadOverview } from "./pages/BmadOverview";
 import { LoginPage } from "./pages/LoginPage";
 import { DefaultFlowEditorPage } from "./flows/DefaultFlowEditorPage";
@@ -100,6 +102,22 @@ export function App() {
           element={
             <AppShell title={th.nav.bmad}>
               <BmadOverview />
+            </AppShell>
+          }
+        />
+        <Route
+          path="/bmad/skills"
+          element={
+            <AppShell title={th.nav.bmad}>
+              <SkillCatalog />
+            </AppShell>
+          }
+        />
+        <Route
+          path="/bmad/skills/:id"
+          element={
+            <AppShell title={th.nav.bmad}>
+              <SkillDetail />
             </AppShell>
           }
         />

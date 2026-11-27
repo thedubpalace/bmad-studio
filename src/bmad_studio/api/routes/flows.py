@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -18,9 +18,12 @@ from bmad_studio.api.schemas import (
     AgentNameListEnvelope,
     FlowDraftCheckEnvelope,
     FlowEditorEnvelope,
+    SkillDetailEnvelope,
     SkillNameListEnvelope,
+    SkillReferencesEnvelope,
 )
-from bmad_studio.core.catalog import agent_names, skill_list
+from bmad_studio.core.catalog import agent_names
+from bmad_studio.core.skill_catalog import missing_skills, skill_catalog, skill_detail
 from bmad_studio.core.flow.default_editor import check_default_draft, default_view
 from bmad_studio.core.flow.editor import check_draft, draft_result, editor_view
 from bmad_studio.core.flow.status import find_project
@@ -69,5 +72,19 @@ async def list_agent_names(request: Request) -> JSONResponse:
 
 
 @router.get("/api/skills", response_model=SkillNameListEnvelope, responses=ERRORS)
-async def list_skills(request: Request) -> JSONResponse:
-    return ok(await run_in_threadpool(skill_list, _paths(request)))
+async def list_skills(request: Request, usage: int = Query(default=1, ge=0, le=1)) -> JSONResponse:
+    """catalog ของ skill (4-1 + 6-2: กลุ่ม, override, ที่ใช้ใน flow) — field เดิม id/description คงรูป.
+    ``?usage=0`` = ไม่ merge flow ทุกโปรเจกต์ (ตัวเลือก skill ของ flow editor)."""
+    return ok(await run_in_threadpool(lambda: skill_catalog(_paths(request), with_usage=bool(usage))))
+
+
+@router.get("/api/skill-references", response_model=SkillReferencesEnvelope, responses=ERRORS)
+async def skill_references(request: Request) -> JSONResponse:
+    """skill ที่ flow อ้างแต่ไม่มีโฟลเดอร์ (REQ-051 a)."""
+    return ok(await run_in_threadpool(missing_skills, _paths(request)))
+
+
+@router.get("/api/skills/{skill}", response_model=SkillDetailEnvelope, responses=FLOW_ERRORS)
+async def get_skill(request: Request, skill: str) -> JSONResponse:
+    """รายละเอียด skill + SKILL.md อ่านอย่างเดียว (ไม่มี API แก้/ลบ SKILL.md — REQ-051 b)."""
+    return ok(await run_in_threadpool(skill_detail, _paths(request), skill))

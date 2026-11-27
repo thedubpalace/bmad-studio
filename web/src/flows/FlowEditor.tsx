@@ -13,7 +13,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { api, ApiError } from "../api/client";
 import type { AgentName, ChangeRequestBody, EditorTrack, FlowDraftCheck, FlowEditor as EditorView, FlowIssue, SkillName } from "../api/types";
@@ -647,8 +647,19 @@ export function FlowEditor({ source }: { source: FlowEditorSource }) {
   const [load, setLoad] = useState<Load>({ kind: "loading", slow: false });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [acknowledged, setAcknowledged] = useState<string[]>([]);
-  const [track, setTrack] = useState("full");
-  const [selected, setSelected] = useState<string | null>(null);
+  // deep link จาก skill catalog (story 6-2): ?track=<t>&stage=<id> เลือกขั้นนั้นตอนเปิด
+  const [params] = useSearchParams();
+  const [track, setTrack] = useState(() => params.get("track") || "full");
+  const [selected, setSelected] = useState<string | null>(() => params.get("stage"));
+  const linkedTrack = params.get("track");
+  const linkedStage = params.get("stage");
+  useEffect(() => {
+    // ลิงก์ "ใช้ใน" ตัวถัดไปไปยัง flow เดิม (editor ไม่ remount) — ตามค่าใน URL ใหม่
+    if (linkedStage) {
+      setTrack(linkedTrack || "full");
+      setSelected(linkedStage);
+    }
+  }, [linkedTrack, linkedStage]);
   const [check, setCheck] = useState<Check>({ kind: "idle" });
   const [agents, setAgents] = useState<AgentName[] | null>(null);
   const [skills, setSkills] = useState<SkillName[] | null>(null);
@@ -696,7 +707,7 @@ export function FlowEditor({ source }: { source: FlowEditorSource }) {
   useEffect(() => {
     void reload();
     api.get<AgentName[]>("/api/agents/names").then(setAgents, () => setAgents(null));
-    api.get<SkillName[]>("/api/skills").then(setSkills, () => setSkills(null));
+    api.get<SkillName[]>("/api/skills?usage=0").then(setSkills, () => setSkills(null));
   }, [reload]);
 
   const dirty = Boolean(draft && loaded && !sameDraft(draft, loaded));
@@ -748,7 +759,10 @@ export function FlowEditor({ source }: { source: FlowEditorSource }) {
   const result = check.kind === "done" ? check.result : check.kind === "checking" ? check.last : null;
   const metaTracks: Record<string, EditorTrack> | null = result?.tracks ?? view?.tracks ?? null;
   // track ที่แสดง = track ที่เลือกถ้ามีใน draft ไม่งั้น track แรก — ทุกการแก้ใช้ key นี้ (ไม่สร้าง track ใหม่)
-  const trackKey = draft && !draft.tracks[track] ? Object.keys(draft.tracks)[0] ?? track : track;
+  // hasOwn: track มาจาก URL ได้ (?track=constructor ต้องไม่ไปเจอ prototype — review 6-2)
+  const trackKey = draft
+    ? Object.hasOwn(draft.tracks, track) ? track : Object.keys(draft.tracks)[0] ?? "full"
+    : view && Object.hasOwn(view.tracks, track) ? track : "full";
   const metaFor = useCallback(
     (id: string): Meta | undefined =>
       metaTracks?.[trackKey]?.stages.find((s) => s.id === id) ?? view?.tracks[trackKey]?.stages.find((s) => s.id === id),
