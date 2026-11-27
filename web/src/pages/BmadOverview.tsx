@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { api, ApiError } from "../api/client";
 import type { Inventory } from "../api/types";
+import { BmadNav } from "../bmad/BmadNav";
 import { Icon } from "../components/Icon";
 import { th } from "../i18n/th";
 
@@ -66,6 +67,7 @@ export function BmadOverview() {
 
   return (
     <>
+      <BmadNav />
       <section className="panel glass overview" aria-labelledby="bmad-version">
         <div className="overview__version">
           <p className="overview__label">{th.bmad.versionLabel}</p>

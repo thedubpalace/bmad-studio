@@ -133,6 +133,8 @@ p {
 .content {
   grid-area: content;
   width: 100%;
+  /* grid item: ไม่ให้ min-content ของ diff บรรทัดยาว (ไม่ตัดบรรทัด) ขยายหน้าเกินจอ — diff เลื่อนในกรอบตัวเอง */
+  min-width: 0;
   max-width: 1120px;
   margin: 0 auto;
   padding: var(--s-6) var(--s-4) var(--s-8);

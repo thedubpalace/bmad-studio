@@ -31,7 +31,8 @@ FORBIDDEN = "path_forbidden"
 _MESSAGE_TH = "ไม่อนุญาตให้เขียนไฟล์นี้"
 
 # deny ถาวร (ชนะ allowlist) — เทียบกับ path สัมพัทธ์ตัวพิมพ์เล็กแบบ posix
-DENY_EXACT: frozenset[str] = frozenset({".veda/projects/registry.json", "_bmad/config.toml"})
+#: ``_bmad/config.user.toml`` ก็ installer-managed (ค่าตอบของผู้ใช้ตอนติดตั้ง) — ไม่อยู่ใน allowlist อยู่แล้ว แต่ deny ชัด ๆ
+DENY_EXACT: frozenset[str] = frozenset({".veda/projects/registry.json", "_bmad/config.toml", "_bmad/config.user.toml"})
 DENY_BASENAMES: frozenset[str] = frozenset({"customize.toml", "skill.md"})
 
 _SAFE_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]*"

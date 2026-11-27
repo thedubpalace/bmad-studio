@@ -7,6 +7,7 @@ import { AppShell } from "./components/AppShell";
 import { EmptyState } from "./components/EmptyState";
 import { SessionExpiredModal } from "./components/SessionDialogs";
 import { th } from "./i18n/th";
+import { ConfigEditor } from "./bmad/ConfigEditor";
 import { BmadOverview } from "./pages/BmadOverview";
 import { LoginPage } from "./pages/LoginPage";
 import { DefaultFlowEditorPage } from "./flows/DefaultFlowEditorPage";
@@ -99,6 +100,14 @@ export function App() {
           element={
             <AppShell title={th.nav.bmad}>
               <BmadOverview />
+            </AppShell>
+          }
+        />
+        <Route
+          path="/bmad/config"
+          element={
+            <AppShell title={th.nav.bmad}>
+              <ConfigEditor />
             </AppShell>
           }
         />

@@ -8,14 +8,19 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
 import threading
+from collections.abc import Iterator, Mapping
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from bmad_studio.adapters.mirror import MirrorIncomplete, bmad_mirror
 from bmad_studio.core.paths import VedaPaths
 
 UNAVAILABLE = "bmad_unavailable"
@@ -114,6 +119,9 @@ class BmadScripts:
         self._uv_path = uv_path
         self._lock = threading.Lock()
         self._config_cache: tuple[tuple, dict] | None = None
+        #: ผลของ resolve_config บน mirror ที่แทนไฟล์หนึ่งด้วย bytes ที่เสนอ — key รวม stamp ของ layer ทุกไฟล์
+        #: (layer อื่นเปลี่ยน = รันใหม่) จึงใช้ร่วมระหว่าง validator, view ของ preview และการตรวจซ้ำตอน commit ได้
+        self._proposed_cache: dict[tuple, dict | BmadUnavailable] = {}
 
     def uv(self) -> str | None:
         return self._uv_path or shutil.which("uv")
@@ -160,6 +168,60 @@ class BmadScripts:
             return json.loads(result.stdout.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             raise BmadUnavailable("bad_output", f"อ่านผลลัพธ์ของ {script.name} ไม่ได้") from None
+
+    # -- temp mirror (AD-10: preview รัน script กับไฟล์ proposed ผ่าน --project-root) ----------------
+    @contextmanager
+    def mirror(self, files: Mapping[str, bytes | None] | None = None, *,
+               installer_only: bool = False) -> Iterator[Path]:
+        """ดู :func:`bmad_studio.adapters.mirror.bmad_mirror` — temp dir นอก veda ลบทิ้งเมื่อจบ.
+        สร้างไม่ได้/ไม่ครบ (temp เต็ม, ไฟล์ใหญ่/อ่านไม่ได้) = :class:`BmadUnavailable` ``mirror_failed``."""
+        with ExitStack() as stack:
+            try:
+                root = stack.enter_context(bmad_mirror(self.paths, files, installer_only=installer_only))
+            except (OSError, RuntimeError, MirrorIncomplete):
+                raise BmadUnavailable("mirror_failed",
+                                      "จำลองไฟล์ config ของ BMAD เพื่อตรวจไม่ครบ (ไฟล์ใหญ่เกิน/อ่านไม่ได้/temp เต็ม)") from None
+            yield root
+
+    def resolve_config_at(self, root: Path) -> dict:
+        """``resolve_config.py --project-root <root>`` (ไม่ cache) — root = mirror ชั่วคราว."""
+        data = self.run_json(self.resolve_config_script, "--project-root", str(root))
+        if not isinstance(data, dict):
+            raise BmadUnavailable("bad_output", "ผลลัพธ์ของ resolve_config.py ไม่ใช่ object")
+        return data
+
+    def _mirror_stamp(self) -> tuple:
+        custom = self.paths.bmad_custom_dir
+        try:
+            names = sorted(e.name for e in os.scandir(custom) if e.name.endswith(".toml"))
+        except OSError:
+            names = []
+        return self._stamp(self._config_inputs()[:2] + [custom / n for n in names] + self._config_inputs()[4:])
+
+    def resolve_config_with(self, rel: str, proposed: bytes) -> dict:
+        """effective เมื่อแทน ``rel`` (ใน ``_bmad/custom``) ด้วย ``proposed`` — cache ตาม (rel, sha, stamp ของทุก layer).
+        ล้ม = :class:`BmadUnavailable` (cache ผลล้มด้วย ยกเว้น timeout/หา uv ไม่เจอ ที่อาจหายเอง)."""
+        key = (rel.lower(), hashlib.sha256(proposed).hexdigest(), self._mirror_stamp())
+        with self._lock:
+            hit = self._proposed_cache.get(key)
+        if isinstance(hit, BmadUnavailable):
+            raise hit
+        if hit is not None:
+            return hit
+        try:
+            with self.mirror({rel: proposed}) as root:
+                data: dict | BmadUnavailable = self.resolve_config_at(root)
+        except BmadUnavailable as exc:
+            if exc.reason in {"timeout", "uv_missing", "mirror_failed"}:
+                raise
+            data = exc
+        with self._lock:
+            if len(self._proposed_cache) >= 32:
+                self._proposed_cache.pop(next(iter(self._proposed_cache)))
+            self._proposed_cache[key] = data
+        if isinstance(data, BmadUnavailable):
+            raise data
+        return data
 
     def resolve_config(self) -> dict:
         """ผลของ ``resolve_config.py --project-root <VEDA_ROOT>`` (cache ตาม mtime ของ input)."""

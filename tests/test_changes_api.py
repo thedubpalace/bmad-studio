@@ -65,9 +65,18 @@ class Studio:
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
 
+def generic_studio(settings: Settings) -> Studio:
+    """Studio สำหรับทดสอบกลไกของ pipeline ด้วยไฟล์ ``_bmad/custom/*`` เป็นเป้าธรรมดา: ปิดกฎตามเนื้อหาของ BMAD
+    (impact จากข้อความ + resolve script, story 6-1) ที่มี test ของตัวเองใน ``test_config_editor.py``."""
+    studio = Studio(settings)
+    studio.app.state.writes.impact_rules.clear()
+    studio.app.state.writes.path_validators.clear()
+    return studio
+
+
 @pytest.fixture
 def studio(wsettings: Settings) -> Studio:
-    return Studio(wsettings)
+    return generic_studio(wsettings)
 
 
 def _edit_line_150(path: Path) -> str:
@@ -194,12 +203,29 @@ def test_commit_creates_new_file_utf8_lf(studio: Studio, veda_root: Path) -> Non
 
 
 def test_crlf_bom_file_keeps_bytes_outside_edit(studio: Studio, veda_root: Path) -> None:
+    # BOM: ใช้ไฟล์ agent (BMAD อ่าน TOML ที่มี BOM ไม่ได้ — _bmad/custom ที่มี BOM เป็น error, story 6-1)
     raw = codecs.BOM_UTF8 + b"a = 1\r\nb = 2\r\nc = 3\r\n"
+    path = veda_root / AGENT
+    path.write_bytes(raw)
+    preview = studio.preview(AGENT, "a = 1\nb = 20\nc = 3\n", sha(raw)).json()["data"]
+    assert studio.commit(preview, typed="developer").status_code == 200
+    assert path.read_bytes() == codecs.BOM_UTF8 + b"a = 1\r\nb = 20\r\nc = 3\r\n"
+
+
+def test_crlf_toml_keeps_bytes_outside_edit(studio: Studio, veda_root: Path) -> None:
+    raw = b"a = 1\r\nb = 2\r\nc = 3\r\n"
     path = veda_root / CUSTOM
     path.write_bytes(raw)
     preview = studio.preview(CUSTOM, "a = 1\nb = 20\nc = 3\n", sha(raw)).json()["data"]
-    assert studio.commit(preview).status_code == 200
-    assert path.read_bytes() == codecs.BOM_UTF8 + b"a = 1\r\nb = 20\r\nc = 3\r\n"
+    assert preview["impact"] == "normal" and studio.commit(preview).status_code == 200
+    assert path.read_bytes() == b"a = 1\r\nb = 20\r\nc = 3\r\n"
+
+
+def test_bom_toml_in_bmad_custom_is_an_error(studio: Studio, veda_root: Path) -> None:
+    raw = codecs.BOM_UTF8 + b"a = 1\r\n"
+    (veda_root / CUSTOM).write_bytes(raw)
+    data = studio.preview(CUSTOM, "a = 2\n", sha(raw)).json()["data"]
+    assert [e["code"] for e in data["errors"]] == ["toml_bom"]
 
 
 def test_file_changed_between_preview_and_commit_is_409(studio: Studio, agent_file: Path) -> None:

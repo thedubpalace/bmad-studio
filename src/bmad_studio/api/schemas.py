@@ -100,6 +100,9 @@ class Diff(BaseModel):
 class Issue(BaseModel):
     code: str
     error: str
+    #: key ของ config/override ที่คำเตือนนี้หมายถึง (story 6-1/6-3)
+    keys: list[str] | None = None
+    line: int | None = None
 
 
 class ChangePreview(BaseModel):
@@ -116,6 +119,8 @@ class ChangePreview(BaseModel):
     errors: list[Issue] = []
     confirm_token: str
     expires_at: str
+    #: ข้อมูลแสดงผลของ kind (เช่น ``effective`` หลังบันทึกจาก resolve script ของ BMAD) — ไม่มีผลต่อการยืนยัน
+    view: dict[str, Any] | None = None
 
 
 class ChangePreviewEnvelope(BaseModel):
@@ -471,3 +476,55 @@ class ClaudeMdProposals(BaseModel):
 class ClaudeMdProposalsEnvelope(BaseModel):
     ok: Literal[True]
     data: ClaudeMdProposals
+
+
+# -- config 3 ชั้น (REQ-040, story 6-1) — คำนวณใน core.config_model -----------------------------------------
+
+class ConfigLayer(BaseModel):
+    exists: bool
+    text: str | None = None
+    sha256: str | None = None
+    issue: Issue | None = None
+
+
+class ConfigRowHas(BaseModel):
+    base: bool
+    team: bool
+    user: bool
+    effective: bool
+
+
+class ConfigRow(BaseModel):
+    key: str
+    #: id ที่ไม่ชนกัน (JSON ของ path) — ชื่อ key ใน TOML มีจุดได้
+    id: str
+    path: list[str]
+    base: Any | None = None
+    team: Any | None = None
+    user: Any | None = None
+    effective: Any | None = None
+    has: ConfigRowHas
+
+
+class ConfigLayers(BaseModel):
+    team: ConfigLayer
+    user: ConfigLayer
+
+
+class ConfigTargets(BaseModel):
+    team: str
+    user: str
+
+
+class ConfigView(BaseModel):
+    layers: ConfigLayers
+    targets: ConfigTargets
+    rows: list[ConfigRow]
+    baseAvailable: bool
+    effectiveAvailable: bool
+    issues: list[Issue] = []
+
+
+class ConfigViewEnvelope(BaseModel):
+    ok: Literal[True]
+    data: ConfigView

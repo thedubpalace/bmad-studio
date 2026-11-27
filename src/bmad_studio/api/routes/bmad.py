@@ -6,7 +6,9 @@ from fastapi.responses import JSONResponse
 
 from bmad_studio.adapters.bmad import BmadUnavailable, list_skills, read_version
 from bmad_studio.api.envelope import ok
-from bmad_studio.api.schemas import ERRORS, InventoryEnvelope
+from bmad_studio.api.schemas import ERRORS, ConfigViewEnvelope, InventoryEnvelope
+from bmad_studio.core.config_model import config_view
+from starlette.concurrency import run_in_threadpool
 
 router = APIRouter()
 
@@ -44,3 +46,9 @@ def inventory(request: Request) -> JSONResponse:
         "config": resolved,
         "tools": {"uv": scripts.uv() is not None, "resolve_script": scripts.resolve_config_script.is_file()},
     })
+
+
+@router.get("/api/bmad/config", response_model=ConfigViewEnvelope, responses=ERRORS)
+async def bmad_config(request: Request) -> JSONResponse:
+    """config 3 ชั้น (REQ-040): base/effective จาก resolve_config.py เท่านั้น (AD-10)."""
+    return ok(await run_in_threadpool(config_view, request.app.state.bmad))

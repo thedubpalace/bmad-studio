@@ -93,12 +93,64 @@ function Issues({ preview }: { preview: ChangePreview }) {
           </h3>
           <ul>
             {warnings.map((w, i) => (
-              <li key={`${w.code}-${i}`}>{w.error}</li>
+              <li key={`${w.code}-${i}`}>
+                {w.error}
+                {w.keys?.length ? (
+                  <span className="issue-keys">
+                    <span className="sr-only">{th.effective.keys}: </span>
+                    {w.keys.map((k) => (
+                      <code key={k} className="mono issue-keys__key">
+                        {k}
+                      </code>
+                    ))}
+                  </span>
+                ) : null}
+              </li>
             ))}
           </ul>
         </section>
       ) : null}
     </>
+  );
+}
+
+interface EffectiveChange {
+  key: string;
+  value?: unknown;
+  removed?: boolean;
+}
+
+function showValue(value: unknown): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
+  return text.length > 300 ? `${text.slice(0, 299)}…` : text;
+}
+
+/** ค่าที่ใช้จริงหลังบันทึก — คำนวณโดย resolve script ของ BMAD บน mirror ชั่วคราว (AD-10) ไม่ใช่โดย UI */
+function EffectivePanel({ preview }: { preview: ChangePreview }) {
+  const view = preview.view as { changed?: EffectiveChange[]; changedTotal?: number; beforeAvailable?: boolean } | null | undefined;
+  if (!view || !Array.isArray(view.changed)) return null;
+  const total = typeof view.changedTotal === "number" ? view.changedTotal : view.changed.length;
+  const hidden = total - view.changed.length;
+  const textual = (preview.warnings ?? []).some((w) => w.code === "prompt_text_change" || w.code === "override_activation_change");
+  return (
+    <section className="effective-panel surface-solid" aria-labelledby="review-effective">
+      <h3 id="review-effective" className="issue-box__title">
+        {th.effective.title}
+      </h3>
+      <p className="muted">{view.beforeAvailable === false ? th.effective.beforeUnknown : th.effective.changed(total)}</p>
+      {textual ? <p className="hint">{th.effective.localNote}</p> : null}
+      {view.changed.length ? (
+        <dl className="effective-list">
+          {view.changed.map((c) => (
+            <div key={c.key} className="effective-list__row">
+              <dt className="mono">{c.key}</dt>
+              <dd className="mono">{c.removed ? th.effective.removed : showValue(c.value)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {hidden > 0 ? <p className="muted">{th.effective.more(hidden)}</p> : null}
+    </section>
   );
 }
 
@@ -117,6 +169,7 @@ function ReviewStep({ pending, onNext }: { pending: PendingChange; onNext: () =>
     <>
       <Summary preview={preview} />
       <Issues preview={preview} />
+      <EffectivePanel preview={preview} />
       <div className="diff-toolbar" role="group" aria-label={th.review.viewLabel}>
         <div className="segmented">
           <button type="button" className="segmented__item" aria-pressed={effectiveMode === "unified"} onClick={() => setMode("unified")}>

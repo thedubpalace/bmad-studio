@@ -10,7 +10,7 @@ import pytest
 
 from bmad_studio.core.settings import Settings
 
-from .test_changes_api import AGENT, CUSTOM, Studio, sha
+from .test_changes_api import AGENT, CUSTOM, Studio, generic_studio, sha
 
 RAW_CRLF_BOM = codecs.BOM_UTF8 + "a = 1\r\nb = 'ไทย'\r\nc = 3\r\n".encode("utf-8")
 
@@ -22,7 +22,7 @@ def wsettings(settings: Settings) -> Settings:
 
 @pytest.fixture
 def studio(wsettings: Settings) -> Studio:
-    return Studio(wsettings)
+    return generic_studio(wsettings)
 
 
 def write(studio: Studio, target: str, text: str, base: str | None, typed: str | None = None) -> dict:
@@ -71,14 +71,15 @@ def test_read_only_diff_of_an_entry(studio: Studio, veda_root: Path) -> None:
 
 
 def test_revert_is_byte_for_byte_for_crlf_bom(studio: Studio, veda_root: Path) -> None:
-    path = veda_root / CUSTOM
+    # BOM ใช้ไฟล์ agent: BMAD อ่าน TOML ที่มี BOM ไม่ได้ (story 6-1 validator ของ _bmad/custom)
+    path = veda_root / AGENT
     path.write_bytes(RAW_CRLF_BOM)
-    entry = write(studio, CUSTOM, "a = 1\nb = 'ไทย'\nc = 30\n", sha(RAW_CRLF_BOM))
+    entry = write(studio, AGENT, "a = 1\nb = 'ไทย'\nc = 30\n", sha(RAW_CRLF_BOM), typed="developer")
     assert path.read_bytes() != RAW_CRLF_BOM
-    preview = revert_preview(studio, CUSTOM, entry["change_id"], sha(path.read_bytes())).json()["data"]
+    preview = revert_preview(studio, AGENT, entry["change_id"], sha(path.read_bytes())).json()["data"]
     assert preview["errors"] == [] and preview["warnings"] == [] and preview["kind"] == "revert"
-    assert preview["impact"] == "normal" and preview["diff"]["added"] == 1
-    result = studio.commit(preview)
+    assert preview["impact"] == "high" and preview["diff"]["added"] == 1
+    result = studio.commit(preview, typed="developer")
     assert result.status_code == 200
     assert hashlib.sha256(path.read_bytes()).hexdigest() == sha(RAW_CRLF_BOM)
     entries = studio.changes()

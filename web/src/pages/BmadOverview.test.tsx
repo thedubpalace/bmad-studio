@@ -1,5 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Inventory } from "../api/types";
@@ -42,7 +43,11 @@ describe("BmadOverview", () => {
 
   async function render() {
     await act(async () => {
-      root.render(<BmadOverview />);
+      root.render(
+        <MemoryRouter initialEntries={["/bmad"]}>
+          <BmadOverview />
+        </MemoryRouter>,
+      );
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));

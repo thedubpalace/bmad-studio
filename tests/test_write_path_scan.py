@@ -77,6 +77,7 @@ RAW_WRITE_ALLOWED = {  # ยกเว้นที่ตั้งใจ (ดู�
     SRC / "adapters" / "state.py",
     SRC / "api" / "audit.py",
     SRC / "cli" / "main.py",
+    SRC / "adapters" / "mirror.py",  # temp dir นอก veda เท่านั้น (story 6-1, AD-10) — test_config_editor ตรวจ
 }
 _WRITE_METHODS = {"write_text", "write_bytes", "touch", "unlink", "rmdir", "mkdir", "symlink_to", "hardlink_to"}
 _OS_CALLS = {"replace", "rename", "renames", "remove", "unlink", "rmdir", "removedirs", "makedirs", "mkdir",

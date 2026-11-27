@@ -1,0 +1,196 @@
+/* ส่วน BMAD: แถบย่อย, ConfigEditor (UX-DR9), ผลหลังบันทึกในหน้า review */
+
+.bmad-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.bmad-nav__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  padding: 0 var(--s-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-hairline);
+  color: var(--text-2);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.bmad-nav__link[aria-current="page"] {
+  background: var(--surface-solid-2);
+  color: var(--text);
+}
+
+.config-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.config-editor__lead {
+  max-width: 68ch;
+}
+
+.config-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3) var(--s-6);
+}
+
+.config-toolbar__file {
+  margin-left: var(--s-2);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+
+.config-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  container-type: inline-size;
+}
+
+.config-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) 0;
+  border-top: 1px solid var(--glass-hairline);
+}
+
+.config-row:first-child {
+  border-top: 0;
+}
+
+.config-row__key {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* มือถือ/แผงแคบ: 3 บรรทัดซ้อน (base → override → effective) */
+.config-row__cells {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s-2);
+}
+
+@container (min-width: 760px) {
+  .config-row__cells {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.config-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-width: 0;
+}
+
+.config-cell__label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1) var(--s-2);
+  font-size: var(--fs-14);
+  color: var(--text-2);
+}
+
+.config-cell__value {
+  overflow-wrap: anywhere;
+}
+
+.config-cell__hint {
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+
+.config-cell--effective .config-cell__value {
+  font-weight: 700;
+}
+
+.config-cell__remove {
+  align-self: flex-start;
+}
+
+.config-text__area {
+  min-height: 18rem;
+  padding: var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-14);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s-3);
+}
+
+.issue-keys {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-2);
+  margin-top: var(--s-1);
+}
+
+.issue-keys__key {
+  font-size: var(--fs-14);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.effective-panel {
+  border-radius: var(--radius-sm);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.effective-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.effective-list__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
+}
+
+.effective-list__row dt,
+.effective-list__row dd {
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-all;
+}
+
+.effective-list__row dt {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.effective-list__row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-2);
+}
+
+@media (max-width: 639px) {
+  /* ชื่อไฟล์อยู่ในคำอธิบายด้านบนแล้ว — ซ่อนในปุ่มเพื่อไม่ให้ตัดกลางคำ */
+  .config-toolbar__file {
+    display: none;
+  }
+}

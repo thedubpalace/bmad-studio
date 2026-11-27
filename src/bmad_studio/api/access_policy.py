@@ -63,6 +63,8 @@ RULES: list[Rule] = [
     *_rules(SESSION_SELF, "POST", "/api/logout"),
     # BMAD inventory (REQ-039)
     *_rules(STUDIO_READ, "GET", "/api/bmad/inventory"),
+    # config 3 ชั้น (REQ-040, story 6-1) — อ่านอย่างเดียว; เขียนผ่าน kind ``config`` ของ write pipeline
+    *_rules(STUDIO_READ, "GET", "/api/bmad/config"),
     # write pipeline (REQ-043, AD-5): preview แล้ว commit ด้วย confirm token
     *_rules(STUDIO_WRITE, "POST", "/api/changes/preview", "/api/changes/commit"),
     *_rules(STUDIO_READ, "GET", "/api/changes", "/api/changes/{change_id}"),

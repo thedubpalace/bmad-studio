@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, ApiError, onAuthProblem, setCsrfToken } from "../api/client";
 import type { SessionData } from "../api/types";
 import { clearDrafts } from "../flows/draftStore";
+import { clearConfigDrafts } from "../bmad/configDraftStore";
 
 type Status = "loading" | "anonymous" | "authenticated" | "error";
 
@@ -31,7 +32,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const lastUser = useRef<string | null>(null);
   const apply = useCallback((data: SessionData) => {
     // draft ใน memory (flow editor) ไม่ข้ามผู้ใช้: login เป็นคนอื่น = ทิ้ง; login ใหม่หลังหมดอายุ (คนเดิม) = เก็บไว้
-    if (data.authenticated && lastUser.current !== null && lastUser.current !== data.username) clearDrafts();
+    if (data.authenticated && lastUser.current !== null && lastUser.current !== data.username) {
+      clearDrafts();
+      clearConfigDrafts();
+    }
     if (data.authenticated) lastUser.current = data.username ?? null;
     setCsrfToken(data.authenticated ? data.csrf ?? null : null);
     setSession(data.authenticated ? data : null);
@@ -77,6 +81,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       await api.post("/api/logout", {}, { quietAuth: true });
     } finally {
       clearDrafts();
+      clearConfigDrafts();
       setCsrfToken(null);
       setSession(null);
       setStatus("anonymous");

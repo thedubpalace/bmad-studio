@@ -137,6 +137,29 @@ describe("ChangeReview", () => {
     });
   }
 
+  it("config preview shows the effective-after-save panel, hidden-count note and warning keys", async () => {
+    pend(preview({
+      path: "_bmad/custom/config.toml", kind: "config", confirm_phrase: "config.toml",
+      warnings: [{ code: "prompt_text_change", error: "ข้อความเปลี่ยน", keys: ["core.document_output_language"] }],
+      view: { changed: [{ key: "core.document_output_language", value: "Thai" }, { key: "core.old", removed: true }],
+              changedTotal: 3, beforeAvailable: true },
+    }));
+    await render();
+    const panel = container.querySelector(".effective-panel")!;
+    expect(panel.textContent).toContain("ค่าที่ใช้จริงเปลี่ยน 3 คีย์");
+    expect(panel.textContent).toContain("Thai");
+    expect(panel.textContent).toContain("(ถูกลบ)");
+    expect(panel.textContent).toContain("และอีก 1 คีย์");
+    expect(panel.textContent).toContain("personal override");
+    expect(Array.from(container.querySelectorAll(".issue-keys__key")).map((k) => k.textContent)).toEqual(["core.document_output_language"]);
+  });
+
+  it("effective panel says the before state is unknown instead of listing everything", async () => {
+    pend(preview({ view: { changed: [], changedTotal: 0, beforeAvailable: false } }));
+    await render();
+    expect(container.querySelector(".effective-panel")?.textContent).toContain("อ่านค่าที่ใช้อยู่ตอนนี้ไม่ได้");
+  });
+
   it("shows the empty state without a pending change", async () => {
     await render();
     expect(text()).toContain("ไม่มีการเปลี่ยนแปลงที่รอตรวจ");

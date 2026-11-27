@@ -100,6 +100,7 @@ export interface ChangePreview {
   errors?: Array<Issue>;
   confirm_token: string;
   expires_at: string;
+  view?: Record<string, unknown> | null;
 }
 
 export interface ChangePreviewEnvelope {
@@ -139,6 +140,55 @@ export interface CommitBody {
   preview_id: string;
   confirm_token: string;
   typed_confirmation?: string | null;
+}
+
+export interface ConfigLayer {
+  exists: boolean;
+  text?: string | null;
+  sha256?: string | null;
+  issue?: Issue | null;
+}
+
+export interface ConfigLayers {
+  team: ConfigLayer;
+  user: ConfigLayer;
+}
+
+export interface ConfigRow {
+  key: string;
+  id: string;
+  path: Array<string>;
+  base?: unknown | null;
+  team?: unknown | null;
+  user?: unknown | null;
+  effective?: unknown | null;
+  has: ConfigRowHas;
+}
+
+export interface ConfigRowHas {
+  base: boolean;
+  team: boolean;
+  user: boolean;
+  effective: boolean;
+}
+
+export interface ConfigTargets {
+  team: string;
+  user: string;
+}
+
+export interface ConfigView {
+  layers: ConfigLayers;
+  targets: ConfigTargets;
+  rows: Array<ConfigRow>;
+  baseAvailable: boolean;
+  effectiveAvailable: boolean;
+  issues?: Array<Issue>;
+}
+
+export interface ConfigViewEnvelope {
+  ok: true;
+  data: ConfigView;
 }
 
 export interface Diff {
@@ -339,6 +389,8 @@ export interface InventoryEnvelope {
 export interface Issue {
   code: string;
   error: string;
+  keys?: Array<string> | null;
+  line?: number | null;
 }
 
 export interface LockedField {

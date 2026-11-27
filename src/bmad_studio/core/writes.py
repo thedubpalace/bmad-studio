@@ -67,6 +67,8 @@ class Proposal:
     warnings: list[dict[str, str]] = field(default_factory=list)
     errors: list[dict[str, str]] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)  # ต่อท้าย changelog (เช่น ``reverts``)
+    #: ข้อมูลแสดงผลของ preview เท่านั้น (เช่น effective หลังบันทึกจาก resolve script) — ไม่เก็บ ไม่ลงนาม
+    view: dict[str, Any] | None = None
 
 
 class KindHandler(Protocol):
@@ -210,7 +212,10 @@ class WritePipeline:
                  kinds: Mapping[str, KindHandler], *, clock: Callable[[], float] = time.time,
                  max_bytes: int = fs.MAX_BYTES, validators: Mapping[str, FileValidator] | None = None,
                  delete_validators: Mapping[str, Callable[[], list[dict[str, str]]]] | None = None,
-                 advisories: Mapping[str, Callable[[str, bytes | None], list[dict[str, str]]]] | None = None) -> None:
+                 advisories: Mapping[str, Callable[[str, bytes | None], list[dict[str, str]]]] | None = None,
+                 impact_rules: Mapping[str, Callable[[str, bytes | None, bytes | None],
+                                                     tuple[str, list[dict[str, Any]]]]] | None = None,
+                 path_validators: Mapping[str, Callable[[str, bytes], list[dict[str, Any]]]] | None = None) -> None:
         if len(secret) < 32:
             raise ValueError("secret ต้องยาวอย่างน้อย 32 ตัวอักษร")
         self.guard = guard
@@ -221,6 +226,11 @@ class WritePipeline:
         self.delete_validators = dict(delete_validators or {})
         #: คำเตือนต่อ rule ที่ทุก kind ได้ (รวม revert/ลบ) — เช่น ปิดขั้นออกแบบ UI ของโปรเจกต์ที่มี frontend
         self.advisories = dict(advisories or {})
+        #: impact ตามเนื้อหาต่อ rule (ทุก kind/op รวม revert/ลบ): (rel, bytes เดิม|None, bytes ใหม่|None) → (impact, คำเตือน)
+        #: ยกระดับได้อย่างเดียว (normal → high) และตรวจซ้ำตอน commit ใต้ lock (เช่น ข้อความที่ BMAD ส่งเข้า prompt)
+        self.impact_rules = dict(impact_rules or {})
+        #: validator ที่ต้องรู้ path (rel, bytes) — รันหลัง validator ปกติผ่าน ทั้ง preview และ commit ใต้ lock
+        self.path_validators = dict(path_validators or {})
         self.clock = clock
         self.max_bytes = max_bytes
         self._key = hmac.new(secret.encode(), _TOKEN_CONTEXT, hashlib.sha256).digest()
@@ -260,11 +270,17 @@ class WritePipeline:
         if expiry < self.clock():
             raise StudioError("confirm_expired", "การยืนยันหมดอายุ เปิดตัวอย่างการแก้ใหม่", 403)
 
-    def _validate(self, rule: str, proposed: bytes) -> list[dict[str, str]]:
-        """validator ของ rule นี้ (ทุก kind รวม revert); rule ใน VALIDATED_RULES ที่ไม่มี validator = ปฏิเสธ."""
+    def _validate(self, rule: str, proposed: bytes, rel: str = "") -> list[dict[str, str]]:
+        """validator ของ rule นี้ (ทุก kind รวม revert); rule ใน VALIDATED_RULES ที่ไม่มี validator = ปฏิเสธ.
+        ``path_validators`` (ต้องรู้ว่าเป็นไฟล์ไหน เช่น รัน resolve script ของ BMAD กับไฟล์นั้น) รันต่อจาก validator ปกติ."""
+        issues: list[dict[str, str]] = []
+        by_path = self.path_validators.get(rule)
         validator = self.validators.get(rule)
         if validator is not None:
-            return list(validator(proposed))
+            issues = list(validator(proposed))
+            if by_path is not None and not issues:
+                issues = list(by_path(rel, proposed))
+            return issues
         if rule in VALIDATED_RULES:
             return [{"code": "validator_missing", "error": "ตรวจไฟล์นี้ไม่ได้ จึงบันทึกไม่ได้"}]
         return []
@@ -284,6 +300,15 @@ class WritePipeline:
 
         return ack_scope(advice)
 
+    def _impact(self, guarded: GuardedPath, current: bytes | None,
+                proposed: bytes | None) -> tuple[str, list[dict[str, Any]]]:
+        impact = impact_for(guarded.rule)
+        rule = self.impact_rules.get(guarded.rule)
+        if rule is None:
+            return impact, []
+        level, warnings = rule(guarded.rel, current, proposed)
+        return ("high" if "high" in (impact, level) else "normal"), list(warnings)
+
     def _lock(self, path: GuardedPath) -> threading.Lock:
         # ไฟล์ flow ทุกไฟล์ใช้ lock เดียว: overlay ถูกตรวจกับ default ปัจจุบัน — default ต้องไม่เปลี่ยนระหว่างตรวจกับเขียน
         key = "flow-files" if path.rule in FLOW_RULES else os.path.normcase(os.fspath(path.path))
@@ -298,6 +323,9 @@ class WritePipeline:
         guarded = self.guard.check_writable(request.target)
         if guarded.rule not in handler.rules:
             raise StudioError("path_forbidden", "ไม่อนุญาตให้เขียนไฟล์นี้", 403, {"reason": "kind_rule"})
+        check_target = getattr(handler, "check_target", None)
+        if check_target is not None:  # kind ที่เขียนได้เฉพาะบางไฟล์ของ rule — ตรวจก่อนอ่านไฟล์/เทียบ base
+            check_target(guarded)
         # ตรวจที่ถูกก่อนงานแพง (propose/diff): จำนวน preview ค้าง
         self.state.sweep_previews(TOKEN_TTL_SECONDS * 2, self.clock())
         if self.state.count_previews() >= MAX_PREVIEWS:
@@ -318,7 +346,7 @@ class WritePipeline:
         if not delete and getattr(handler, "check_whitespace", True):
             errors.extend(_whitespace_errors(current, proposal.proposed))
         if not delete:
-            errors.extend(self._validate(guarded.rule, proposal.proposed))
+            errors.extend(self._validate(guarded.rule, proposal.proposed, guarded.rel))
         else:
             errors.extend(self._validate_delete(guarded.rule))
         try:
@@ -330,8 +358,9 @@ class WritePipeline:
                 errors.append({"code": "unsupported_encoding", "error": "ผลลัพธ์ไม่ใช่ข้อความ UTF-8"})
         advisory = self.advisories.get(guarded.rule)
         advice = list(advisory(guarded.rel, proposal.proposed)) if advisory is not None else []
+        impact, impact_warnings = self._impact(guarded, current.raw if current.exists else None, proposal.proposed)
         errors = _dedupe(errors)
-        warnings = _dedupe(list(proposal.warnings) + advice)
+        warnings = _dedupe(list(proposal.warnings) + advice + impact_warnings)
         if diff.get("truncated"):
             if getattr(handler, "allow_truncated", False):
                 warnings.append({"code": "diff_summary_only",
@@ -348,7 +377,7 @@ class WritePipeline:
             "op": "delete" if delete else "modify" if current.exists else "create",
             "base_sha256": current.sha256, "proposed_sha256": _sha(proposal.proposed),
             "extra": proposal.extra,
-            "impact": impact_for(guarded.rule), "confirm_phrase": confirm_phrase(guarded),
+            "impact": impact, "confirm_phrase": confirm_phrase(guarded),
             "errors": errors, "warnings": warnings, "added": diff["added"], "removed": diff["removed"],
             # ชุดโปรเจกต์ที่คำเตือน ux ใน preview นี้แสดง — การยืนยันครอบคลุมเฉพาะชุดนี้ (retro epic-4 A3)
             "ack_scope": self._ack_scope(advice) if advisory is not None else [],
@@ -363,6 +392,7 @@ class WritePipeline:
             "base_sha256": current.sha256, "proposed_sha256": meta["proposed_sha256"],
             "diff": diff, "warnings": warnings, "errors": errors,
             "confirm_token": self._token(meta, session_fp), "expires_at": utc_iso(expiry),
+            "view": proposal.view,
         }
 
     # -- commit --------------------------------------------------------------
@@ -407,7 +437,7 @@ class WritePipeline:
             # ตรวจซ้ำใต้ lock: default/catalog/overlay ของโปรเจกต์อาจเปลี่ยนระหว่าง preview กับ commit (TTL 10 นาที).
             # การลบตรวจด้วย delete validator ของ rule (ลบ flow เริ่มต้น); ลบ overlay = กลับไปใช้ default ที่ตรวจแล้ว
             if not delete:
-                late = self._validate(guarded.rule, proposed)
+                late = self._validate(guarded.rule, proposed, guarded.rel)
             else:
                 late = self._validate_delete(guarded.rule)
             extra = meta.get("extra") or {}
@@ -425,6 +455,9 @@ class WritePipeline:
                         "เปิดตัวอย่างใหม่แล้วยืนยันอีกครั้ง", 409, {"projects": grown})
                 if "acknowledged" in extra:
                     late = ack_errors(advice, list(extra.get("acknowledged") or []))
+            if not late and meta.get("impact") != "high" and self._impact(guarded, original, None if delete else proposed)[0] == "high":
+                # impact ตามเนื้อหาต้องไม่สูงกว่าที่ผู้ใช้ยืนยันไว้ (กันข้าม typed confirmation)
+                raise StudioError("impact_changed", "การแก้นี้ต้องยืนยันแบบพิมพ์ชื่อไฟล์ — เปิดตัวอย่างใหม่", 409)
             if late:
                 raise StudioError("has_errors", "ไฟล์นี้ไม่ผ่านการตรวจแล้ว (มีการเปลี่ยนแปลงหลังตัวอย่าง) — เปิดตัวอย่างใหม่",
                                   422, {"errors": late})

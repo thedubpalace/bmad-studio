@@ -7,6 +7,7 @@ import { SessionProvider } from "./auth/SessionContext";
 import "./styles/tokens.css";
 import "./styles/app.css";
 import "./styles/flow-editor.css";
+import "./styles/bmad.css";
 
 const root = document.getElementById("root");
 if (root) {
