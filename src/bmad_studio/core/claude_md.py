@@ -46,14 +46,34 @@ DEFAULT_RESOLVER_PROJECT = "C:/Users/thedu/code/bmad-studio"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-_UNSAFE_PROJECT = re.compile(r"[`\"'\r\n\x00$&;|<>]")
+#: อักขระ ASCII ที่ path ของ repo มีได้ (allowlist, retro epic-5 item 4) — นอกนี้ห้ามหมด รวม tab, ``%`` (ตัวแปรของ cmd),
+#: ``!``/``^`` (cmd), ``*?[]{}`` (glob), quote/backtick, ``$&;|<>`` และช่องว่างอื่นนอกจาก space ธรรมดา
+_PROJECT_ASCII = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /\\:._-~()+@,")
+#: อักขระที่ไม่ใช่ ASCII รับเฉพาะตัวอักษร/เครื่องหมายกำกับ/ตัวเลข (เช่น ชื่อโฟลเดอร์ภาษาไทย) — ไม่รับ Z*/C*/สัญลักษณ์
+_PROJECT_UNICODE_CATEGORIES = ("L", "M", "N")
+MAX_RESOLVER_PROJECT = 260
+
+
+def _project_char_ok(ch: str) -> bool:
+    if ch.isascii():
+        return ch in _PROJECT_ASCII
+    return unicodedata.category(ch)[0] in _PROJECT_UNICODE_CATEGORIES
 
 
 def check_resolver_project(project: str) -> str:
-    """ค่าของ ``resolver_project`` ที่จะเขียนลง CLAUDE.md/agent — ห้ามว่างและห้ามมีอักขระที่ทำ code span/คำสั่งเสีย."""
-    value = project.strip().replace("\\", "/")
-    if not value or _UNSAFE_PROJECT.search(value):
-        raise ValueError("resolver_project ต้องเป็น path ที่ไม่ว่างและไม่มี ` \" ' $ & ; | < > หรือขึ้นบรรทัด")
+    """ค่าของ ``resolver_project`` ที่จะเขียนลง CLAUDE.md/agent (เป็นส่วนหนึ่งของคำสั่งที่ agent รัน).
+
+    allowlist ทีละอักขระบนค่าดิบ (ก่อนตัดช่องว่างหัวท้าย — ``str.strip()`` ตัด tab/U+2028 ทิ้งเงียบ ๆ): ตัวอักษร ตัวเลข
+    space ธรรมดา และ ``/ \\ : . _ - ~ ( ) + @ ,``; ห้ามว่าง ห้ามขึ้นต้นด้วย ``-`` (กลายเป็น option ของ uv) และยาวไม่เกิน
+    :data:`MAX_RESOLVER_PROJECT`.
+    """
+    if not isinstance(project, str) or len(project) > MAX_RESOLVER_PROJECT:
+        raise ValueError("resolver_project ต้องเป็นข้อความยาวไม่เกิน 260 ตัวอักษร")
+    bad = next((ch for ch in project if not _project_char_ok(ch)), None)
+    value = project.strip(" ").replace("\\", "/")
+    if bad is not None or not value or value.startswith("-"):
+        raise ValueError("resolver_project ต้องเป็น path ที่ไม่ว่าง ไม่ขึ้นต้นด้วย - และมีเฉพาะตัวอักษร ตัวเลข ช่องว่าง "
+                         "และ / \\ : . _ - ~ ( ) + @ ,")
     return value
 
 
@@ -467,14 +487,39 @@ GUARD_PATTERNS: tuple[tuple[str, str, re.Pattern[str]], ...] = (
     ("designReady", "ux-design", re.compile(r"`?designReady`?\s*!=\s*`?true`?", re.ASCII)),
     ("designReady", "ux-design", re.compile(r"`?designReady`?\s*(?:ไม่ใช่|ไม่เป็น|ยังไม่เป็น)\s*`?true`?", re.ASCII)),
 )
-#: ข้อความที่บอกว่า guard ข้อเดียวกันมี gate อื่นด้วย (review 5-2 B1) — flag ``*Ready`` ตัวอื่นทุกตัว และคำที่อ้าง
-#: human gate / plan gate ทั้งไทยและอังกฤษ. เจอ = ไม่เสนอ diff แต่บอกให้แยกเงื่อนไขเอง (fail safe: เสนอน้อยไปดีกว่า)
+#: ข้อความที่บอกว่า guard ข้อเดียวกันมี gate อื่นด้วย (review 5-2 B1) — คำที่อ้าง human gate / plan gate ทั้งไทยและ
+#: อังกฤษ; flag ``*ready`` ตรวจแยกที่ :data:`_FLAG_LIKE`. เจอ = ไม่เสนอ diff แต่ให้แยกเงื่อนไขเอง (fail safe: เสนอน้อยไปดีกว่า)
 _OTHER_GATE = re.compile(
-    # flag แบบ camelCase เท่านั้น (ตรงตัวพิมพ์ — "already" ไม่ใช่ flag) ยกเว้น designReady เอง
-    r"(?<![A-Za-z])(?!designReady\b)[a-z][A-Za-z]*Ready(?![A-Za-z])"
-    r"|(?i:requirement|human\s*(?:gate|review)|/review|approv|\bplans?\b|\bplann(?:ed|ing)\b|\bsprint\b"
+    r"(?i:requirement|human\s*(?:gate|review)|/review|approv|\bplans?\b|\bplann(?:ed|ing)\b|\bsprint\b"
     r"|\bstor(?:y|ies)\b|ความต้องการ|อนุมัติ|แผน|รีวิว)",
 )
+#: flag รูป ``<ชื่อ><ตัวคั่น?>ready`` ทุกตัวพิมพ์ (retro epic-5 item 3): ``planReady``, ``plan_ready``, ``PLAN_READY``,
+#: ``plan-ready``, ``plan.ready``, ``planready``, ``REQUIREMENTS__READY`` … ตรวจบนข้อความที่ผ่าน :func:`_gate_text`
+#: (NFKC + ตัด Cf + อักษรคล้าย) จึงจับ fullwidth/zero-width/Cyrillic ด้วย. ไม่นับ: ``designReady`` เอง (ทุกรูป),
+#: คำอังกฤษ ``already``/``unready`` และชื่อที่คั่นด้วยช่องว่างล้วน (ประโยคธรรมดา เช่น "is ready")
+_FLAG_LIKE = re.compile(r"(?<![a-z0-9])([a-z][a-z0-9]*?)([\s_.\-]*)ready(?![a-z0-9])", re.IGNORECASE)
+_NOT_FLAG_PREFIX = frozenset({"al", "un"})
+_SELF_FLAG = "design"
+
+
+def _gate_text(line: str) -> str:
+    """ข้อความสำหรับตรวจ gate: NFKC, ตัด Cf (ZWSP/ZWJ/…) และแทนอักษรคล้ายละติน — ไม่ใช่ข้อความที่แสดง/เขียน."""
+    value = unicodedata.normalize("NFKC", line)
+    return "".join(ch for ch in value if unicodedata.category(ch) != "Cf").translate(_CONFUSABLES)
+
+
+def _flag_words(text: str) -> list[str]:
+    out = []
+    for m in _FLAG_LIKE.finditer(text):
+        prefix, sep = m.group(1).lower(), m.group(2)
+        if prefix == _SELF_FLAG:
+            continue
+        if not sep and prefix in _NOT_FLAG_PREFIX:
+            continue
+        if sep and not sep.strip():  # คั่นด้วยช่องว่างล้วน = ประโยค ไม่ใช่ชื่อ flag
+            continue
+        out.append(m.group(0))
+    return out
 MAX_AGENT_BYTES = 256 * 1024
 MAX_OTHER_GATES = 10  # ชื่อ gate ที่แสดง (พอให้คนรู้ว่าต้องแยกอะไร)
 #: บอกว่า guard อ้าง resolver แล้ว (ข้อเสนอถูกใช้แล้ว) — ไม่ผูกกับ path ของ repo (ย้าย repo แล้วยังนับว่าใช้แล้ว)
@@ -607,8 +652,8 @@ def _guard_unit(lines: list[str], index: int, scannable: list[bool]) -> list[int
 def _other_gates(lines: list[str], unit: list[int]) -> list[str]:
     found: list[str] = []
     for j in unit:
-        for m in _OTHER_GATE.finditer(lines[j]):
-            word = m.group(0)
+        text = _gate_text(lines[j])
+        for word in [*_flag_words(text), *(m.group(0) for m in _OTHER_GATE.finditer(text))]:
             if word not in found:
                 found.append(word)
     return found

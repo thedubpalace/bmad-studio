@@ -407,3 +407,60 @@ def test_unsafe_resolver_project_is_rejected(bad: str) -> None:
 
 def test_resolver_project_backslashes_become_slashes() -> None:
     assert cm.resolve_prefix("C:\\Users\\x\\bmad-studio").startswith("uv run --project C:/Users/x/bmad-studio ")
+
+
+# -- retro epic-5 item 3: gate detector ครอบคลุมทุกรูปตัวคั่น/ตัวพิมพ์ของ flag *ready --------------------------
+
+FLAG_VARIANTS = [
+    "planReady", "plan_ready", "PLAN_READY", "planready", "PLANREADY", "plan-ready", "plan.ready", "Plan_Ready",
+    "plan__ready", "plan_-_ready", "requirementsReady", "requirements_ready", "REQUIREMENTS_READY",
+    "requirementsready", "RequirementsReady", "tests_ready", "TESTSREADY",
+    "ｐｌａｎ＿ｒｅａｄｙ",  # fullwidth
+    "plan\u200b_ready", "plan\u200dReady",  # zero-width ภายในชื่อ
+    "рlan_ready",  # Cyrillic р
+]
+
+
+@pytest.mark.parametrize("flag", FLAG_VARIANTS)
+def test_other_gate_flag_variants_make_guard_manual(studio: Studio, flag: str) -> None:
+    item = _guards_of(studio, "variant", f"- `designReady != true` หรือ `{flag} != true` → หยุด\n")
+    assert item is not None and item["state"] == "manual" and item["diff"] is None, flag
+    assert item["guards"][0]["otherGates"], flag
+
+
+NOT_OTHER_GATE = {
+    "already": "- `designReady != true` → หยุด (already done otherwise)\n",
+    "unready": "- `designReady != true` → หยุด ถ้ายัง unready\n",
+    "self-snake": "- `designReady != true` (หรือ design_ready) → หยุด\n",
+    "prose-space": "- `designReady != true` → หยุด until it is ready\n",
+}
+
+
+@pytest.mark.parametrize("case", sorted(NOT_OTHER_GATE))
+def test_words_that_are_not_other_gates_keep_suggestion(studio: Studio, case: str) -> None:
+    item = _guards_of(studio, "notgate", NOT_OTHER_GATE[case])
+    assert item is not None and item["state"] == "suggested", (case, item and item["guards"])
+
+
+# -- retro epic-5 item 4: resolver_project เป็น allowlist ----------------------------------------------------
+
+@pytest.mark.parametrize("bad", [
+    "C:/x\ty", "C:/x\u2028y", "C:/x\u2029y", "C:/x\u00a0y", "C:/x\u3000y", "C:/x\u200by", "C:/x\x0by", "C:/x\x1fy",
+    "C:/x\x7fy", "C:/%USERPROFILE%/x", "-C:/x", " -C:/x", "--project=x", "C:/x*", "C:/x?", "C:/x[1]", "C:/x{a}",
+    "C:/x!y", "C:/x^y", "\tC:/x", "C:/x\t", "C:/x\u2028", "C:/x\u202ey", "C:/x\ufeffy", "x" * 261,
+])
+def test_resolver_project_allowlist_rejects(bad: str) -> None:
+    from pydantic import ValidationError
+
+    from bmad_studio.core.settings import Settings as S
+
+    with pytest.raises(ValidationError):
+        S(_env_file=None, resolver_project=bad)
+    with pytest.raises(ValueError):
+        cm.resolve_prefix(bad)
+
+
+@pytest.mark.parametrize("good", ["C:/Users/thedu/code/bmad-studio", "D:/other checkout/bmad-studio",
+                                  "C:/Users/ทดสอบ/bmad-studio", r"C:\x\b_c.d~1(2)+e@f,g", " C:/x "])
+def test_resolver_project_allowlist_accepts(good: str) -> None:
+    assert cm.check_resolver_project(good) == good.strip(" ").replace("\\", "/")
