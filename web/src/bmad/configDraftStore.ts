@@ -6,7 +6,7 @@ export type Scalar = string | number | boolean;
 
 /** ค่าในฟอร์ม: ตัวเลขเก็บเป็นข้อความดิบจนกว่าจะส่ง (พิมพ์ "1." ระหว่างทางได้) */
 export type Edit =
-  | { kind: "set"; path: string[]; value: Scalar | string[]; numeric?: boolean }
+  | { kind: "set"; path: string[]; value: Scalar | string[]; numeric?: boolean; list?: boolean }
   | { kind: "unset"; path: string[] };
 
 export interface ConfigDraft {

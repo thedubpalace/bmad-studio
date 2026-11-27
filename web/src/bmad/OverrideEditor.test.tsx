@@ -152,9 +152,83 @@ describe("OverrideEditor (tab override of /bmad/skills/<id>)", () => {
     expect(container.querySelector("#review-page")).not.toBeNull();
   });
 
-  it("the detail tab hides the editor", async () => {
+  it("the detail tab hides the editor and the override tab replaces the detail (tabpanel)", async () => {
     await render();
+    expect(container.querySelector("[role=tabpanel] .override-editor")).not.toBeNull();
+    expect(container.querySelector(".skill-uses, .skill-detail__md")).toBeNull();
     act(() => button("รายละเอียด").click());
     expect(container.querySelector(".override-editor")).toBeNull();
+    expect(container.querySelector(".skill-detail__md")).not.toBeNull();
+  });
+
+  it("list fields keep typed newlines (Enter works) and split only on submit", async () => {
+    await render([basePreview]);
+    const area = () => container.querySelector<HTMLTextAreaElement>(".override-field textarea")!;
+    type(area(), "first step");
+    type(area(), "first step\n");
+    expect(area().value).toBe("first step\n");
+    type(area(), "first step\n  second step  \r\n\n");
+    await act(async () => button("ตรวจสอบและดูการเปลี่ยนแปลง").click());
+    await flush();
+    expect(previewBodies()[0].payload.set).toEqual([{ path: ["workflow", "activation_steps_append"], value: ["first step", "second step"] }]);
+  });
+
+  it("retyping the current number is not an edit", async () => {
+    await render();
+    const input = container.querySelectorAll<HTMLInputElement>(".override-field input")[0];
+    type(input, "4");
+    expect(container.querySelectorAll(".override-field")[1].textContent).toContain("แก้แล้ว");
+    type(input, "3");
+    expect(container.querySelectorAll(".override-field")[1].textContent).not.toContain("แก้แล้ว");
+  });
+
+  it("personal layer writes the .user.toml file and drafts are kept per skill and layer", async () => {
+    await render([basePreview]);
+    act(() => button("personal").click());
+    type(container.querySelectorAll<HTMLInputElement>(".override-field input")[0], "7");
+    act(() => root.unmount());
+    root = createRoot(container);
+    await render([basePreview]);
+    act(() => button("personal").click());
+    expect(container.querySelectorAll<HTMLInputElement>(".override-field input")[0].value).toBe("7");
+    act(() => button("team").click());
+    expect(container.querySelectorAll<HTMLInputElement>(".override-field input")[0].value).toBe("3");
+    act(() => button("personal").click());
+    await act(async () => button("ตรวจสอบและดูการเปลี่ยนแปลง").click());
+    await flush();
+    const body = previewBodies()[0];
+    expect(body.target).toBe("_bmad/custom/bmad-build.user.toml");
+    expect(body.base_sha256).toBeNull();
+  });
+
+  it("existing keys outside the surface are pointed out", async () => {
+    const withOutside = { ...view, outside: { team: ["workflow.not_a_field"], user: [] } };
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(json(url.includes("/override") ? withOutside : detail)));
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/bmad/skills/bmad-build?tab=override"]}>
+          <Routes><Route path="/bmad/skills/:id" element={<SkillDetail />} /></Routes>
+        </MemoryRouter>,
+      );
+    });
+    await flush();
+    await flush();
+    expect(container.textContent).toContain("workflow.not_a_field");
+  });
+
+  it("a skill without customize.toml has no override tab even with ?tab=override", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(json({ ...detail, customizable: false })));
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/bmad/skills/veda?tab=override"]}>
+          <Routes><Route path="/bmad/skills/:id" element={<SkillDetail />} /></Routes>
+        </MemoryRouter>,
+      );
+    });
+    await flush();
+    expect(container.querySelector("[role=tab]")).toBeNull();
+    expect(container.querySelector(".override-editor")).toBeNull();
+    expect(fetchMock.mock.calls.some(([u]) => String(u).includes("/override"))).toBe(false);
   });
 });

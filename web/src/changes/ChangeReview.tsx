@@ -121,8 +121,8 @@ interface EffectiveChange {
 }
 
 function showValue(value: unknown): string {
-  const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
-  return text.length > 300 ? `${text.slice(0, 299)}…` : text;
+  // ไม่ตัดความยาว: ค่าที่ agent จะอ่านต้องเห็นครบก่อนยืนยัน (review 6-3) — CSS ตัดบรรทัดให้
+  return typeof value === "string" ? value : JSON.stringify(value) ?? "";
 }
 
 /** ค่าที่ใช้จริงหลังบันทึก — คำนวณโดย resolve script ของ BMAD บน mirror ชั่วคราว (AD-10) ไม่ใช่โดย UI */

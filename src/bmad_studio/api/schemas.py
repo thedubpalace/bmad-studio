@@ -599,7 +599,7 @@ class OverrideField(BaseModel):
     path: list[str]
     rule: Literal["replace", "append", "keyed"]
     keyedBy: str | None = None
-    type: Literal["string", "number", "boolean", "list", "complex"]
+    type: Literal["string", "number", "boolean", "list", "table", "complex"]
     default: Any | None = None
     instruction: bool
     team: Any | None = None

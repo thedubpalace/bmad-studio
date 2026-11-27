@@ -18,6 +18,7 @@ export function SkillDetail({ children }: { children?: (data: Detail) => React.R
   const [showMd, setShowMd] = useState(false);
   const mdId = useId();
   const [params, setParams] = useSearchParams();
+  const tabsId = useId();
   const tab = params.get("tab") === "override" ? "override" : "detail";
 
   const load = useCallback(async () => {
@@ -65,15 +66,26 @@ export function SkillDetail({ children }: { children?: (data: Detail) => React.R
         <h2 id="skill-title" className="section-title mono">{data.id}</h2>
         <p className="item__desc skill-detail__desc">{data.description || th.bmad.noDescription}</p>
         {data.customizable ? (
-          <div className="segmented" role="tablist" aria-label={th.override.tabsLabel}>
+          <div className="segmented" role="tablist" aria-label={th.override.tabsLabel}
+               onKeyDown={(e) => {
+                 if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+                 const next = tab === "override" ? "detail" : "override";
+                 setParams(next === "override" ? { tab: next } : {}, { replace: true });
+                 window.requestAnimationFrame(() => document.getElementById(`${tabsId}-${next}`)?.focus());
+               }}>
             {(["detail", "override"] as const).map((t) => (
-              <button key={t} type="button" role="tab" className="segmented__item" aria-selected={tab === t}
-                      aria-pressed={tab === t} onClick={() => setParams(t === "override" ? { tab: t } : {}, { replace: true })}>
+              <button key={t} id={`${tabsId}-${t}`} type="button" role="tab" className="segmented__item"
+                      aria-selected={tab === t} aria-controls={`${tabsId}-panel`} tabIndex={tab === t ? 0 : -1}
+                      onClick={() => setParams(t === "override" ? { tab: t } : {}, { replace: true })}>
                 {t === "override" ? th.override.tab : th.override.tabDetail}
               </button>
             ))}
           </div>
         ) : null}
+        <div id={`${tabsId}-panel`} role={data.customizable ? "tabpanel" : undefined}
+             aria-labelledby={data.customizable ? `${tabsId}-${tab}` : undefined} className="skill-detail__panel">
+          {data.customizable && tab === "override" ? <OverrideEditor skill={data.id} /> : (
+            <>
         <p className="item__tags">
           {data.overrideTeam ? <span className="tag tag--warn">{th.bmad.overrideTeam}</span> : null}
           {data.overrideUser ? <span className="tag tag--warn">{th.bmad.overrideUser}</span> : null}
@@ -115,8 +127,10 @@ export function SkillDetail({ children }: { children?: (data: Detail) => React.R
             </div>
           ) : null}
         </div>
+            </>
+          )}
+        </div>
       </section>
-      {data.customizable && tab === "override" ? <OverrideEditor skill={data.id} /> : null}
       {children ? children(data) : null}
     </>
   );

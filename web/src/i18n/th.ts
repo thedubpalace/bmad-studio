@@ -456,6 +456,8 @@ export const th = {
           : "ค่าที่ใส่แทนที่ค่า default ทั้งค่า",
     instructionTag: "คำสั่งที่ agent รัน — ผลสูง",
     instructionHelp: "ข้อความในช่องนี้กลายเป็นคำสั่งที่ agent รันทุกครั้งที่เริ่ม skill — บันทึกต้องพิมพ์ชื่อไฟล์ยืนยัน",
+    textTag: "ข้อความที่ agent อ่าน — ผลสูง",
+    textHelp: "ค่าข้อความถูกแทนลงคำสั่งของ skill — บันทึกต้องพิมพ์ชื่อไฟล์ยืนยัน",
     defaultLabel: "default:",
     listPlaceholder: "หนึ่งรายการต่อบรรทัด",
     fieldsLabel: "ฟิลด์ที่ปรับได้",
@@ -465,7 +467,7 @@ export const th = {
     outsideAck: "ยืนยันว่าตั้งใจใส่ key เหล่านี้",
     existingOutside: (keys: string) => `ไฟล์นี้มี key นอกพื้นผิวอยู่แล้ว (${keys}) — ดู/แก้ในโหมดข้อความ`,
     effectiveTitle: "ผลหลัง merge (ตอนนี้)",
-    effectiveHint: (file: string) => `จาก resolve_customization.py ของ BMAD — หลังกดตรวจสอบจะเห็นค่าที่เปลี่ยนเมื่อบันทึก ${file}`,
+    effectiveHint: (file: string) => `ค่าที่ใช้อยู่ตอนนี้จาก resolve_customization.py ของ BMAD — ค่าหลังบันทึก ${file} อยู่ในหน้าตรวจการเปลี่ยนแปลง`,
     loadFailed: "โหลด override ของ skill ไม่ได้",
   },
   effective: {

@@ -436,7 +436,7 @@ export interface OverrideField {
   path: Array<string>;
   rule: "replace" | "append" | "keyed";
   keyedBy?: string | null;
-  type: "string" | "number" | "boolean" | "list" | "complex";
+  type: "string" | "number" | "boolean" | "list" | "table" | "complex";
   default?: unknown | null;
   instruction: boolean;
   team?: unknown | null;

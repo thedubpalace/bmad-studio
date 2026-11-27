@@ -14,9 +14,9 @@ import { type ConfigDraft, type Edit, type Layer, loadConfigDraft, saveConfigDra
 const OUTSIDE = "override_outside_surface";
 
 function show(value: unknown): string {
+  // ไม่ตัดความยาว: ค่าที่ agent จะอ่านต้องเห็นครบ (review 6-3) — CSS ตัดบรรทัดให้
   if (value === null || value === undefined) return "";
-  const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
-  return text.length > 300 ? `${text.slice(0, 299)}…` : text;
+  return typeof value === "string" ? value : JSON.stringify(value) ?? "";
 }
 
 function RuleBadge({ field }: { field: OverrideField }) {
@@ -30,6 +30,8 @@ function RuleBadge({ field }: { field: OverrideField }) {
   );
 }
 
+const listText = (value: unknown): string => (Array.isArray(value) ? value.map(String).join("\n") : String(value ?? ""));
+
 function FieldRow({ field, layer, edit, onChange }: {
   field: OverrideField; layer: Layer; edit: Edit | undefined; onChange: (e: Edit | null) => void;
 }) {
@@ -38,19 +40,28 @@ function FieldRow({ field, layer, edit, onChange }: {
   const has = field.has[layer];
   const current = field[layer];
   const removing = edit?.kind === "unset";
-  const editable = field.type !== "complex" && !(has && typeof current === "object" && !Array.isArray(current));
-  const shownValue = edit?.kind === "set" ? edit.value : has ? current : field.type === "list" ? [] : "";
-  const asText = field.type === "list"
-    ? (Array.isArray(shownValue) ? (shownValue as unknown[]).map(String).join("\n") : String(shownValue ?? ""))
-    : String(shownValue ?? "");
-  const set = (raw: Scalar | string[], numeric = false) => {
-    const original = has ? current : undefined;
-    if (JSON.stringify(raw) === JSON.stringify(original) || (!has && (raw === "" || (Array.isArray(raw) && raw.length === 0)))) {
+  const isList = field.type === "list";
+  const currentOk = !has || (isList ? Array.isArray(current) && current.every((v) => typeof v === "string")
+    : field.type === "complex" ? false : typeof current !== "object");
+  const editable = field.type !== "complex" && field.type !== "table" && currentOk;
+  // ช่องหลายบรรทัดเลือกจากค่าตั้งต้น (ไม่ใช่ข้อความที่กำลังพิมพ์) — ไม่สลับ element ระหว่างพิมพ์
+  const multiline = isList || [field.default, current].some((v) => typeof v === "string" && (v.includes("\n") || v.length > 80));
+  // list เก็บข้อความดิบใน draft (กด Enter เพิ่มบรรทัดได้) แล้วแยกบรรทัดตอนส่ง
+  const asText = edit?.kind === "set" ? String(edit.value) : has ? (isList ? listText(current) : String(current ?? "")) : "";
+  const originalText = has ? (isList ? listText(current) : String(current ?? "")) : "";
+  const set = (raw: Scalar, kind: "number" | "list" | null = null) => {
+    if (kind === "number" ? raw === originalText || (String(raw).trim() !== "" && Number(raw) === current)
+      : typeof raw === "boolean" ? raw === current : raw === originalText) {
       onChange(null);
       return;
     }
-    onChange({ kind: "set", path: field.path, value: raw as Scalar, numeric });
+    if (!has && raw === "") {
+      onChange(null);
+      return;
+    }
+    onChange({ kind: "set", path: field.path, value: raw, numeric: kind === "number", list: kind === "list" });
   };
+  const textual = field.type === "string" || isList;
   return (
     <li className={`override-field${field.instruction ? " override-field--instruction" : ""}`}>
       <div className="override-field__head">
@@ -58,12 +69,14 @@ function FieldRow({ field, layer, edit, onChange }: {
         <RuleBadge field={field} />
         {field.instruction ? (
           <span className="tag tag--warn"><Icon name="alert" size={14} /> {th.override.instructionTag}</span>
+        ) : textual ? (
+          <span className="tag">{th.override.textTag}</span>
         ) : null}
         {edit ? <span className="tag tag--warn">{removing ? th.config.willRemove : th.config.edited}</span> : null}
       </div>
       <p id={helpId} className="hint">
         {th.override.ruleHelp(field.rule, field.keyedBy ?? "id")}
-        {field.instruction ? ` ${th.override.instructionHelp}` : ""}
+        {field.instruction ? ` ${th.override.instructionHelp}` : textual ? ` ${th.override.textHelp}` : ""}
       </p>
       <p className="override-field__default">
         <span className="muted">{th.override.defaultLabel}</span> <span className="mono">{show(field.default) || th.config.notSet}</span>
@@ -71,20 +84,21 @@ function FieldRow({ field, layer, edit, onChange }: {
       {!editable ? (
         <p className="hint">{th.config.complexValue}{has ? ` — ${show(current)}` : ""}</p>
       ) : field.type === "boolean" ? (
-        <select id={id} className="input mono" aria-describedby={helpId} value={removing ? "" : String(shownValue)} disabled={removing}
+        <select id={id} className="input mono" aria-describedby={helpId}
+                value={removing ? "" : edit?.kind === "set" ? String(edit.value) : has ? String(current) : ""} disabled={removing}
                 onChange={(e) => (e.target.value === "" ? onChange(null) : set(e.target.value === "true"))}>
           {!has ? <option value="">{th.config.notSet}</option> : null}
           <option value="true">{th.config.trueLabel}</option>
           <option value="false">{th.config.falseLabel}</option>
         </select>
-      ) : field.type === "list" || (field.type === "string" && asText.includes("\n")) ? (
-        <textarea id={id} className="input mono override-field__area" aria-describedby={helpId} rows={field.type === "list" ? 3 : 5}
-                  value={removing ? "" : asText} disabled={removing} placeholder={field.type === "list" ? th.override.listPlaceholder : th.config.notSet}
-                  onChange={(e) => set(field.type === "list" ? e.target.value.split("\n").filter((l) => l.trim() !== "") : e.target.value)} />
+      ) : multiline ? (
+        <textarea id={id} className="input mono override-field__area" aria-describedby={helpId} rows={isList ? 3 : 5}
+                  value={removing ? "" : asText} disabled={removing} placeholder={isList ? th.override.listPlaceholder : th.config.notSet}
+                  onChange={(e) => set(e.target.value, isList ? "list" : null)} />
       ) : (
         <input id={id} className="input mono" aria-describedby={helpId} value={removing ? "" : asText} disabled={removing}
                placeholder={th.config.notSet} inputMode={field.type === "number" ? "decimal" : undefined}
-               onChange={(e) => set(e.target.value, field.type === "number")} />
+               onChange={(e) => set(e.target.value, field.type === "number" ? "number" : null)} />
       )}
       {has ? (
         <button type="button" className="button button--secondary config-cell__remove"
@@ -110,6 +124,8 @@ function formPayload(edits: Record<string, Edit>): { set: unknown[]; unset: stri
       const n = Number(raw);
       if (raw === "" || !Number.isFinite(n)) return { error: th.config.badNumber(edit.path.join(".")) };
       value = n;
+    } else if (edit.list) {
+      value = String(edit.value).replace(/\r/g, "").split("\n").map((l) => l.trim()).filter((l) => l !== "");
     }
     set.push({ path: edit.path, value });
   }
