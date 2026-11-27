@@ -336,3 +336,15 @@ def test_surface_fields_are_not_truncated_for_the_outside_check() -> None:
 
 def test_empty_table_in_surface_accepts_free_keys() -> None:
     assert om.outside_surface({"workflow": {"extra": {}}}, {"workflow": {"extra": {"anything": 1}}}) == []
+
+
+@needs_uv
+@pytest.mark.parametrize(("old", "new"), [
+    ("[workflow]\nmax_rounds = 3 # step 1\n", "[workflow]\nmax_rounds = 3 # step 9\n"),
+    ("# use true\n[workflow]\nstrict = true\n", "# use false\n[workflow]\nstrict = true\n"),
+])
+def test_override_comment_digit_or_bool_edit_is_high(studio: Studio, root: Path, old: str, new: str) -> None:
+    (root / TEAM).write_bytes(old.encode("utf-8"))
+    data = preview(studio, TEAM, {"text": new}, file_sha(root, TEAM)).json()["data"]
+    assert data["impact"] == "high"
+    assert studio.commit(data).status_code == 400

@@ -365,3 +365,46 @@ def test_view_when_current_config_unresolvable_marks_before_unknown(studio: Stud
 def test_rows_have_collision_free_ids() -> None:
     out = cfg.rows({"a.b": 1, "a": {"b": 2}}, {}, {}, None)
     assert [r["key"] for r in out] == ["a.b", "a.b"] and len({r["id"] for r in out}) == 2
+
+
+# -- rework round 1: 6-1 B1 / 6-3 B3 — classifier fail closed (comment/ข้อความ/key/โครงสร้าง ห้ามเปลี่ยนแบบ normal) ------
+
+B1_HIGH = [
+    (b"max_rounds = 3 # run step 1\n", b"max_rounds = 3 # run step 9\n"),  # ตัวเลขใน comment ท้ายบรรทัด
+    (b"max_rounds = 3 # run 1 step\n", b"max_rounds = 4 # run 9 step\n"),  # ค่า + comment พร้อมกัน
+    (b"# keep 1\nmax_rounds = 3\n", b"# keep 2\nmax_rounds = 3\n"),  # comment ทั้งบรรทัด
+    (b"# use true\nx = 1\n", b"# use false\nx = 1\n"),  # boolean ใน comment
+    (b"# a 1\nx = 1\n", b"# a 1\n# a 2\nx = 1\n"),  # เพิ่มบรรทัด comment
+    (b"x = 1 # a\n", b"x = 2 #  a\n"),  # ช่องว่างใน comment
+    (b"x = 1\n", b"x = 1\n\n"),  # เพิ่มบรรทัด
+    (b"x = 1\n", b"x  = 2\n"),  # ช่องว่างรอบ key
+    (b'"x" = 1\n', b'"x" = 2\n'),  # quoted key (fail closed)
+    (b"t = { a = 1 }\n", b"t = { a = 2 }\n"),  # inline table
+    (b"a.b = 1\n", b"a.c = 1\n"),  # dotted key ชื่อเปลี่ยน
+    (b"x = 1\ny = 2\n", b"y = 2\nx = 1\n"),  # สลับลำดับ
+    (b"x = 1\n", b"x = 0x1\n"),  # ค่าเท่าเดิมแต่ข้อความต่าง → literal ต่างอย่างเดียวผ่าน, ตรวจว่าไม่ล้ม
+]
+
+
+@pytest.mark.parametrize(("old", "new"), B1_HIGH[:-1])
+def test_comment_text_key_and_structure_changes_are_never_normal(old: bytes, new: bytes) -> None:
+    assert cfg.classify(TEAM, old, new)[0] == "high", (old, new)
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    (b"x = 1\n", b"x = 2\n"),
+    (b"x = 1 # keep\n", b"x = 5 # keep\n"),
+    (b"[w]\n  y = true\n", b"[w]\n  y = false\n"),
+    (b"a.b = 1.5\r\n", b"a.b = 2.5\r\n"),
+])
+def test_value_only_number_or_bool_changes_stay_normal(old: bytes, new: bytes) -> None:
+    assert cfg.classify(TEAM, old, new)[0] == "normal"
+
+
+@needs_uv
+def test_comment_digit_edit_through_the_api_needs_typed_confirm(settings: Settings, root: Path) -> None:
+    studio = Studio(settings.model_copy(update={"enable_text_kind": True}))
+    (root / TEAM).write_bytes(b"[core]\nmax_rounds = 3 # run 1 step\n")
+    data = preview(studio, TEAM, {"text": "[core]\nmax_rounds = 4 # run 9 step\n"}, team_sha(root), kind="text").json()["data"]
+    assert data["impact"] == "high"
+    assert studio.commit(data).status_code == 400

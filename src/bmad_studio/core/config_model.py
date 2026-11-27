@@ -156,10 +156,13 @@ def changed_paths(old: Mapping[str, Any], new: Mapping[str, Any]) -> list[tuple[
 
 
 _MISSING = object()
-#: literal ตัวเลข/boolean ของ TOML — แทนด้วยตัวเดียวกันเพื่อเทียบว่า "ข้อความอื่นทั้งไฟล์" (key, comment, string) เหมือนเดิม
-_NUMBER_LITERAL = re.compile(
-    r"(?<![A-Za-z0-9_.\"'-])(?:true|false|[+-]?(?:inf|nan|0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+"
-    r"|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d[\d_]*)?))(?![A-Za-z0-9_.:-])")
+#: บรรทัดที่แก้ได้แบบ normal (review 6-1 B1 — fail closed): ``<เยื้อง><bare/dotted key><=><literal ตัวเลข/boolean><ท้าย>``
+#: ทั้งบรรทัด; ส่วนอื่นนอก literal (เยื้อง, key, ช่องว่าง, comment ท้ายบรรทัด) ต้องเหมือนเดิมทุกตัวอักษร. quoted key,
+#: inline table/array, string และ comment ทั้งบรรทัดไม่ match = ไม่ใช่ normal
+_BARE_KEY = r"[A-Za-z0-9_-]+(?:[ \t]*\.[ \t]*[A-Za-z0-9_-]+)*"
+_LITERAL = (r"(?:true|false|[+-]?(?:inf|nan|0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+"
+            r"|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d[\d_]*)?))")
+_VALUE_LINE = re.compile(rf"(?P<head>[ \t]*{_BARE_KEY}[ \t]*=[ \t]*)(?P<lit>{_LITERAL})(?P<tail>[ \t]*(?:#.*)?)")
 
 
 def _scalar_class(value: Any) -> str | None:
@@ -171,14 +174,31 @@ def _scalar_class(value: Any) -> str | None:
     return None
 
 
-def _masked(raw: bytes) -> str:
-    text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
-    return _NUMBER_LITERAL.sub("#N", text)
+def _lines(raw: bytes) -> list[str]:
+    return raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def _only_value_literals_differ(old_raw: bytes, new_raw: bytes) -> bool:
+    """ทุกบรรทัดเหมือนเดิม ยกเว้นบรรทัด ``key = <literal>`` ที่ต่างเฉพาะ literal (comment ท้ายบรรทัดเหมือนเดิม)."""
+    old_lines, new_lines = _lines(old_raw), _lines(new_raw)
+    if len(old_lines) != len(new_lines):
+        return False
+    for a, b in zip(old_lines, new_lines):
+        if a == b:
+            continue
+        ma, mb = _VALUE_LINE.fullmatch(a), _VALUE_LINE.fullmatch(b)
+        if not ma or not mb or ma["head"] != mb["head"] or ma["tail"] != mb["tail"]:
+            return False
+    return True
 
 
 def _numbers_only_change(old_raw: bytes, new_raw: bytes, old: Mapping[str, Any], new: Mapping[str, Any]) -> bool:
-    """normal ได้ก็ต่อเมื่อ: ชุด key เท่าเดิมทุกชั้น, ทุกค่าที่ต่างเป็น boolean/ตัวเลขชนิดเดิมทั้งสองฝั่ง และ
-    ข้อความทั้งไฟล์ที่ไม่ใช่ literal ตัวเลข/boolean (key, comment, string, ระยะเยื้อง) เหมือนเดิมทุกตัวอักษร."""
+    """normal ได้ก็ต่อเมื่อ (fail closed — ทุกข้อ): ชุด key เท่าเดิมทุกชั้น, ทุกค่าที่ต่างเป็น boolean/ตัวเลขชนิดเดิม
+    ทั้งสองฝั่ง, comment ทั้งไฟล์เหมือนเดิม และทุกบรรทัดที่ต่างเป็นบรรทัด ``key = literal`` ที่ต่างเฉพาะ literal."""
+    if comments("\n".join(_lines(old_raw))) != comments("\n".join(_lines(new_raw))):
+        return False
+    if not _only_value_literals_differ(old_raw, new_raw):
+        return False
     a, b = leaves(old), leaves(new)
     if set(a) != set(b):
         return False
@@ -188,7 +208,7 @@ def _numbers_only_change(old_raw: bytes, new_raw: bytes, old: Mapping[str, Any],
         kind = _scalar_class(a[path])
         if kind is None or kind != _scalar_class(b[path]):
             return False
-    return _masked(old_raw) == _masked(new_raw)
+    return True
 
 
 def classify(rel: str, current: bytes | None, proposed: bytes | None) -> tuple[str, list[Issue]]:
