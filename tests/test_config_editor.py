@@ -445,3 +445,19 @@ def test_mirror_stamp_tracks_upper_case_toml(root: Path) -> None:
     before = scripts._mirror_stamp()
     (root / "_bmad/custom/extra.TOML").write_text("x = 1\n", encoding="utf-8")
     assert scripts._mirror_stamp() != before
+
+
+@pytest.mark.parametrize("payload", [{"set": [{"path": ["core", "max_rounds"], "value": 4}]}, {"text": "x = 1\n"}])
+def test_oversized_config_file_is_refused_fast(studio: Studio, root: Path, payload: dict) -> None:
+    import time
+
+    (root / TEAM).write_text("[core]\n" + "".join(f'k{i} = "xxxxxxxxxxxx"\n' for i in range(12000)), encoding="utf-8")
+    started = time.perf_counter()
+    response = preview(studio, TEAM, payload, team_sha(root))
+    assert response.status_code == 413 and time.perf_counter() - started < 5
+
+
+def test_multibyte_text_is_measured_in_bytes(studio: Studio, root: Path) -> None:
+    text = 'x = "' + "ก" * (cfg.MAX_CUSTOM_BYTES // 3 + 10) + '"\n'
+    assert len(text) < cfg.MAX_CUSTOM_BYTES < len(text.encode("utf-8"))
+    assert preview(studio, TEAM, {"text": text}, team_sha(root)).status_code == 413

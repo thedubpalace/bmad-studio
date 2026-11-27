@@ -43,6 +43,8 @@ DELETE_WITHOUT_VALIDATOR = frozenset({"flow-project"})
 #: คำเตือน key นอกพื้นผิวของ override (story 6-3) — ทุก kind ต้องยืนยันด้วย ``payload.acknowledged``
 ACK_OUTSIDE = "override_outside_surface"
 ACK_OUTSIDE_UNCONFIRMED = "override_outside_surface_unconfirmed"
+#: คำเตือนที่ต้องยืนยันด้วย ACK_OUTSIDE — รวมกรณีตรวจ surface ไม่สำเร็จ (fail closed, ไม่ข้ามการยืนยันเงียบ ๆ)
+ACK_OUTSIDE_TRIGGERS = frozenset({ACK_OUTSIDE, "override_advisory_failed", "override_surface_unreadable"})
 TOKEN_TTL_SECONDS = 10 * 60
 HISTORY_LIMIT = 500
 MAX_PREVIEWS = 200  # preview ที่ยังไม่หมดอายุทั้งระบบ (ผู้ใช้เดียว); เกิน = 429 ไม่ไล่ของเดิมทิ้ง
@@ -218,7 +220,8 @@ class WritePipeline:
                  advisories: Mapping[str, Callable[[str, bytes | None], list[dict[str, str]]]] | None = None,
                  impact_rules: Mapping[str, Callable[[str, bytes | None, bytes | None],
                                                      tuple[str, list[dict[str, Any]]]]] | None = None,
-                 path_validators: Mapping[str, Callable[[str, bytes], list[dict[str, Any]]]] | None = None) -> None:
+                 path_validators: Mapping[str, Callable[[str, bytes], list[dict[str, Any]]]] | None = None,
+                 rule_max_bytes: Mapping[str, int] | None = None) -> None:
         if len(secret) < 32:
             raise ValueError("secret ต้องยาวอย่างน้อย 32 ตัวอักษร")
         self.guard = guard
@@ -234,6 +237,8 @@ class WritePipeline:
         self.impact_rules = dict(impact_rules or {})
         #: validator ที่ต้องรู้ path (rel, bytes) — รันหลัง validator ปกติผ่าน ทั้ง preview และ commit ใต้ lock
         self.path_validators = dict(path_validators or {})
+        #: เพดานขนาดต่อ rule (ไฟล์เดิมและผลลัพธ์) ตรวจก่อน diff/validator ทุก kind — กัน DoS (rework review, _bmad/custom)
+        self.rule_max_bytes = dict(rule_max_bytes or {})
         self.clock = clock
         self.max_bytes = max_bytes
         self._key = hmac.new(secret.encode(), _TOKEN_CONTEXT, hashlib.sha256).digest()
@@ -311,8 +316,8 @@ class WritePipeline:
         value = request.payload.get("acknowledged") if isinstance(request.payload, Mapping) else None
         if value is None:
             return []
-        if not isinstance(value, list) or len(value) > 8 or not all(isinstance(v, str) and len(v) <= 64 for v in value):
-            raise StudioError("invalid_request", "payload.acknowledged ต้องเป็นรายการ code ของคำเตือน", 422)
+        if not isinstance(value, list) or not all(v == ACK_OUTSIDE for v in value):
+            raise StudioError("invalid_request", f"payload.acknowledged รับเฉพาะ [\"{ACK_OUTSIDE}\"]", 422)
         return value
 
     def _impact(self, guarded: GuardedPath, current: bytes | None,
@@ -346,11 +351,18 @@ class WritePipeline:
         if self.state.count_previews() >= MAX_PREVIEWS:
             raise StudioError("too_many_previews", "มีตัวอย่างการแก้ค้างมากเกินไป รอสักครู่แล้วลองใหม่", 429)
         current = fs.read_doc(guarded.path, self.max_bytes)
+        cap = self.rule_max_bytes.get(guarded.rule)
+        too_large = StudioError("file_too_large_for_rule", "ไฟล์ใหญ่เกินเพดานของไฟล์ชนิดนี้ — แก้ด้วยมือ", 413,
+                                {"max_bytes": cap})
+        if cap is not None and current.exists and len(current.raw) > cap:
+            raise too_large
         if request.base_sha256 != current.sha256:
             raise StudioError("conflict", "ไฟล์ถูกแก้จากภายนอกระหว่างที่คุณแก้ โหลดใหม่ก่อน", 409,
                               {"current_sha256": current.sha256})
         proposal = handler.propose(guarded, current, request.payload)
         delete = proposal.proposed is None
+        if not delete and cap is not None and len(proposal.proposed) > cap:
+            raise too_large
         if not delete and len(proposal.proposed) > self.max_bytes:
             raise StudioError("file_too_large", "ไฟล์ใหญ่เกินกว่าที่สตูดิโอแก้ได้", 413)
         errors = list(proposal.errors)
@@ -375,7 +387,7 @@ class WritePipeline:
         advice = list(advisory(guarded.rel, proposal.proposed)) if advisory is not None else []
         impact, impact_warnings = self._impact(guarded, current.raw if current.exists else None, proposal.proposed)
         extra = dict(proposal.extra)
-        if any(w.get("code") == ACK_OUTSIDE for w in advice):
+        if any(w.get("code") in ACK_OUTSIDE_TRIGGERS for w in advice):
             # key นอก surface ต้องยืนยันทุก kind (override, text, revert) — ไม่ใช่แค่ kind ที่ตรวจเอง (review 6-3 N1)
             acknowledged = list(extra.get("acknowledged") or self._acknowledged(request))
             extra["acknowledged"] = acknowledged
@@ -485,7 +497,7 @@ class WritePipeline:
                 acknowledged = list(extra.get("acknowledged") or [])
                 if "acknowledged" in extra:
                     late = ack_errors(advice, acknowledged)
-                if any(w.get("code") == ACK_OUTSIDE for w in advice) and ACK_OUTSIDE not in acknowledged:
+                if any(w.get("code") in ACK_OUTSIDE_TRIGGERS for w in advice) and ACK_OUTSIDE not in acknowledged:
                     late = list(late) + [{"code": ACK_OUTSIDE_UNCONFIRMED,
                                           "error": "มี key นอกพื้นผิวที่ปรับได้ (customize.toml เปลี่ยนหลังตัวอย่าง) — เปิดตัวอย่างใหม่"}]
             check_target = getattr(self.kinds.get(str(meta.get("kind"))), "check_target", None)

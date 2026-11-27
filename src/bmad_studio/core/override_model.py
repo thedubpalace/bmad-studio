@@ -150,7 +150,7 @@ def file_facts(data: Mapping[str, Any]) -> list[str]:
 
 def _outside_issue(keys: list[str]) -> Issue:
     return cfg.issue(ACK_OUTSIDE, "มี key ที่ไม่อยู่ในพื้นผิวที่ skill นี้เปิดให้ปรับ (customize.toml) — BMAD อาจไม่ใช้ค่าเหล่านี้ "
-                                  "หรือ skill อาจตีความต่างไป ยืนยันก่อนบันทึก", keys=keys[:200])
+                                  "หรือ skill อาจตีความต่างไป ยืนยันก่อนบันทึก", keys=keys)
 
 
 def advisory(scripts: BmadScripts) -> Any:
@@ -190,7 +190,10 @@ def resolve_issues(scripts: BmadScripts, rel: str, proposed: bytes) -> list[Issu
     if target is None:
         return []
     if load_surface(scripts, target[0]) is None:
-        return []
+        # fail closed (rework review): ไฟล์ override ของ skill ที่ไม่มี/อ่าน customize.toml ไม่ได้ — ตรวจ surface และ
+        # resolver ไม่ได้ จึงเขียนไม่ได้ทุก kind (text/revert ด้วย); ลบไฟล์ (ย้ายไป backup) ยังทำได้
+        return [cfg.issue("override_surface_unreadable", "ไม่พบหรืออ่าน customize.toml ของ skill นี้ไม่ได้ — "
+                                                         "ตรวจ override ไม่ได้ จึงบันทึกไม่ได้")]
     try:
         # ชื่อไฟล์ตัวสะกดมาตรฐาน — mirror บน FS ที่สนตัวพิมพ์ต้องแทนไฟล์ที่ BMAD อ่านจริง
         scripts.resolve_customization_with(target[0], override_rel(*target), proposed)

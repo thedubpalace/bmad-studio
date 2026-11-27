@@ -108,7 +108,8 @@ def _build_pipeline(settings: Settings, scripts: BmadScripts) -> WritePipeline:
                          delete_validators={**delete_validators(paths), claude_md.RULE: claude_md.delete_issues},
                          advisories=override_model.compose_advisories(advisories(paths), override_model.advisory(scripts)),
                          impact_rules=config_model.impact_rules(),
-                         path_validators=override_model.path_validators(scripts))
+                         path_validators=override_model.path_validators(scripts),
+                         rule_max_bytes={config_model.RULE: config_model.MAX_CUSTOM_BYTES})
 
 
 def create_app(settings: Settings | None = None, *, check: bool = True) -> FastAPI:

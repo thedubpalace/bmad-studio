@@ -479,14 +479,15 @@ def test_oversized_custom_file_is_refused_fast(studio: Studio, root: Path, kind:
     (root / TEAM).write_text(big, encoding="utf-8", newline="\n")
     started = time.perf_counter()
     form = preview(studio, TEAM, {"set": [{"path": ["workflow", "max_rounds"], "value": 4}]}, file_sha(root, TEAM),
-                   kind="override")
-    assert form.status_code == 413 and form.json()["code"] == "bmad_custom_too_large"
+                   kind=kind if kind == "override" else "override")
+    assert form.status_code == 413
+    # ทุก kind (รวม text) ถูกปฏิเสธที่ pipeline ก่อน diff/validator — ไม่จ่ายค่า diff ของไฟล์ใหญ่ (rework review)
     text = preview(studio, TEAM, {"text": big + "z = 1\n"}, file_sha(root, TEAM), kind=kind)
-    if kind == "override":
-        assert text.status_code == 413
-    else:
-        assert "bmad_custom_too_large" in [e["code"] for e in text.json()["data"]["errors"]]
+    assert text.status_code == 413 and text.json()["code"] in {"file_too_large_for_rule", "bmad_custom_too_large"}
     assert time.perf_counter() - started < 5
+    (root / TEAM).write_text("[workflow]\nmax_rounds = 3\n", encoding="utf-8")
+    small_to_big = preview(studio, TEAM, {"text": big}, file_sha(root, TEAM), kind=kind)
+    assert small_to_big.status_code == 413
 
 
 def test_file_just_under_the_cap_is_accepted(studio: Studio, root: Path) -> None:
@@ -497,3 +498,88 @@ def test_file_just_under_the_cap_is_accepted(studio: Studio, root: Path) -> None
     assert len(body.encode()) <= cfg.MAX_CUSTOM_BYTES
     assert cfg.validate_toml(body.encode()) == []
     assert [i["code"] for i in cfg.validate_toml(body.encode() + b"x = 1\n")] == ["bmad_custom_too_large"]
+
+
+# -- rework round 1 review layers ----------------------------------------------------------------------
+
+FILE_ANYWHERE = [
+    '[workflow]\nreview_guidance = ["file:../../secret.md"]\n',
+    '[workflow]\ndoc_standards = ["file:C:/Users/x/.ssh/id_rsa"]\n',
+    '[workflow]\nstyle_guide = "file:~/x.md"\n',
+    '[workflow]\nhtml_theme = "file:%USERPROFILE%/t.md"\n',
+    '[workflow]\ncreative_tools = ["file:/etc/passwd"]\n',
+    '[workflow]\nfinalize_reviewers = ["  FILE:../x"]\n',
+    '[[workflow.research_types]]\ncode = "a"\npack = "file:C:/x.md"\n',
+    '[[workflow.research_types]]\ncode = "a"\ntemplate_path = "C:/x.md"\n',
+    '[workflow]\npersistent_facts = [["file:C:/x"]]\n',
+    '[workflow]\nbrain_methods = "C:/Users/x/evil.csv"\n',
+    '[workflow]\noutput_folder_name = "../../../../Users/x/Startup"\n',
+    '[core]\nproject_name = "../../../x"\n',
+    '[workflow]\nspec_template = "docs/CON"\n',
+    '[workflow]\nspec_output_path = "{project-root}/x/{spec_file}"\n',
+]
+
+
+@pytest.mark.parametrize("text", FILE_ANYWHERE)
+def test_file_and_path_values_are_checked_everywhere(text: str) -> None:
+    from bmad_studio.core import config_model as cfg
+
+    assert "path_outside_root" in [i["code"] for i in cfg.validate_toml(text.encode())], text
+
+
+@pytest.mark.parametrize("text", [
+    '[workflow]\nfinalize_reviewers = ["Verify every decision was researched and/or reality-checked"]\n',
+    '[workflow]\ncommit_message = "feat: {story}"\n',
+    '[agent]\nname = "Mary"\n',
+    '[workflow]\nspec_output_path = "{project-root}/เอกสาร/สเปก"\n',  # ชื่อไทยมีสระ/วรรณยุกต์ (Mn)
+    '[agent]\nicon = "🏗️"\n',  # emoji + VS16 ตัวเดียว (installer ใช้)
+])
+def test_prose_names_thai_paths_and_emoji_are_not_false_positives(text: str) -> None:
+    from bmad_studio.core import config_model as cfg
+
+    assert cfg.validate_toml(text.encode("utf-8")) == [], text
+
+
+@pytest.mark.parametrize("ch", ["\u0378", "\ufdd0", "\uffff", "\U0010ffff", "\U0001d159", "\ufffc", "\u3000", "\u2003",
+                                "\u205f", "\u00a0", "\ufe0f\ufe0f", "a\ufe0f"])
+def test_more_invisible_characters_are_rejected(ch: str) -> None:
+    from bmad_studio.core import config_model as cfg
+
+    text = '[agent]\nicon = "🏗' + ch + 'x"\n' if ch.startswith("\ufe0f") else f'[agent]\nx = "a{ch}b"\n'
+    assert "hidden_characters" in [i["code"] for i in cfg.validate_toml(text.encode("utf-8"))], repr(ch)
+
+
+@needs_uv
+def test_ack_scope_covers_every_outside_key_not_just_the_shown_ones(studio: Studio, root: Path) -> None:
+    keys = "".join(f"k{i:03d} = 1\n" for i in range(250))
+    data = preview(studio, TEAM, {"text": "[workflow]\nstrict = false\n" + keys,
+                                  "acknowledged": ["override_outside_surface"]}, None).json()["data"]
+    assert data["errors"] == []
+    customize = root / CUSTOMIZE
+    customize.write_text(customize.read_text(encoding="utf-8").replace("strict = true\n", ""), encoding="utf-8")
+    response = studio.commit(data, typed="bmad-build.toml")
+    assert response.status_code == 409 and response.json()["details"]["keys"] == ["workflow.strict"]
+
+
+@needs_uv
+@pytest.mark.parametrize("kind", ["text", "override"])
+def test_unreadable_customize_toml_blocks_every_kind(studio: Studio, root: Path, kind: str) -> None:
+    (root / CUSTOMIZE).write_text("[workflow\nbroken", encoding="utf-8")
+    response = preview(studio, TEAM, {"text": "[workflow]\nmax_rounds = 4\n"}, None, kind=kind)
+    if kind == "override":
+        assert response.status_code == 403  # ไม่ใช่ skill ที่ปรับได้แล้ว
+        return
+    codes = [e["code"] for e in response.json()["data"]["errors"]]
+    assert "override_surface_unreadable" in codes
+
+
+def test_pipeline_acknowledged_accepts_only_the_outside_code(studio: Studio) -> None:
+    response = preview(studio, TEAM, {"text": "[workflow]\nnot_a_field = 1\n", "acknowledged": ["ux_disabled_frontend"]},
+                       None, kind="text")
+    assert response.status_code == 422
+
+
+def test_hex_literal_with_same_value_classifies_without_error() -> None:
+    from bmad_studio.core import config_model as cfg
+
+    assert cfg.classify(TEAM, b"x = 1\n", b"x = 0x1\n")[0] in {"normal", "high"}

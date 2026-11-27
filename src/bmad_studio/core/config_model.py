@@ -86,23 +86,45 @@ _IGNORABLE_RANGES: tuple[tuple[int, int], ...] = (
 )
 
 
-def _hidden(ch: str) -> bool:
+_EMOJI_VS = frozenset({0xFE0E, 0xFE0F})
+_BLANK_EXTRA = frozenset({0x1D159, 0xFFFC})
+
+
+def _hidden(ch: str, previous: str = "") -> bool:
     """อักขระที่มองไม่เห็นหรือสลับทิศการแสดงผล — ซ่อนคำสั่งจากผู้ตรวจ diff ได้: Default_Ignorable_Code_Point ทุกตัว,
-    Cf/Co/Cs, control ยกเว้น tab/ขึ้นบรรทัด, Zl/Zp."""
+    Cf/Co/Cs/Cn (ยังไม่กำหนด/noncharacter), control ยกเว้น tab/ขึ้นบรรทัด, Zl/Zp, ช่องว่างที่ไม่ใช่ ASCII (Zs เช่น
+    U+3000, U+2000–200A) และ U+1D159/U+FFFC. ยกเว้นเดียว: VS15/VS16 **ตัวเดียว** ต่อท้ายสัญลักษณ์ (So) — emoji เช่น 🏗️
+    ที่ installer ใช้เป็น icon (variation selector ที่เรียงกันหลายตัว/ต่อท้ายตัวอักษรยังนับว่าซ่อน)."""
     if ch in "\t\n\r":
         return False
     code = ord(ch)
-    if any(lo <= code <= hi for lo, hi in _IGNORABLE_RANGES):
+    if code in _EMOJI_VS and previous and unicodedata.category(previous) == "So":
+        return False
+    if code in _BLANK_EXTRA or any(lo <= code <= hi for lo, hi in _IGNORABLE_RANGES):
         return True
-    return unicodedata.category(ch) in {"Cf", "Co", "Cs", "Cc", "Zl", "Zp"}
+    category = unicodedata.category(ch)
+    if category == "Zs":
+        return ch != " "
+    return category in {"Cf", "Co", "Cs", "Cc", "Cn", "Zl", "Zp"}
+
+
+def _first_hidden(text: str) -> str | None:
+    previous = ""
+    for ch in text:
+        if _hidden(ch, previous):
+            return ch
+        previous = ch
+    return None
 
 
 def hidden_characters(text: str) -> list[str]:
     """ตำแหน่ง (บรรทัด:คอลัมน์ + code point) ของอักขระที่มองไม่เห็นในข้อความทั้งไฟล์ (สูงสุด MAX_LISTED)."""
     found = []
     for line_no, line in enumerate(text.split("\n"), 1):
+        previous = ""
         for col, ch in enumerate(line, 1):
-            if _hidden(ch):
+            hidden, previous = _hidden(ch, previous), ch
+            if hidden:
                 found.append(f"{line_no}:{col} U+{ord(ch):04X}")
                 if len(found) >= MAX_LISTED:
                     return found
@@ -115,7 +137,7 @@ def _hidden_in_values(data: Any, path: tuple[str, ...] = ()) -> list[tuple[tuple
     if isinstance(data, Mapping):
         for key, value in data.items():
             here = (*path, str(key))
-            bad = next((ch for ch in str(key) if _hidden(ch)), None)
+            bad = _first_hidden(str(key))
             if bad:
                 out.append((here, bad))
             out += _hidden_in_values(value, here)
@@ -123,7 +145,7 @@ def _hidden_in_values(data: Any, path: tuple[str, ...] = ()) -> list[tuple[tuple
         for item in data:
             out += _hidden_in_values(item, path)
     elif isinstance(data, str):
-        bad = next((ch for ch in data if _hidden(ch)), None)
+        bad = _first_hidden(data)
         if bad:
             out.append((path, bad))
     return out
@@ -137,7 +159,8 @@ def too_large() -> StudioError:
 def check_size(current: fs.TextDoc, payload: Mapping[str, Any]) -> None:
     """ก่อนงานแพง (tomlkit/diff/resolver): ไฟล์เดิมหรือข้อความที่ส่งมาใหญ่เกินเพดาน = 413."""
     text = payload.get("text") if isinstance(payload, Mapping) else None
-    if len(current.raw) > MAX_CUSTOM_BYTES or (isinstance(text, str) and len(text) > MAX_CUSTOM_BYTES):
+    if len(current.raw) > MAX_CUSTOM_BYTES or (
+            isinstance(text, str) and len(text.encode("utf-8", "surrogatepass")) > MAX_CUSTOM_BYTES):
         raise too_large()
 
 
@@ -152,12 +175,11 @@ def validate_toml(proposed: bytes) -> list[Issue]:
     hidden = hidden_characters(proposed.decode("utf-8"))
     # escape ใน TOML ("​", "\u0007") ไม่ปรากฏเป็นอักขระดิบในไฟล์ แต่ค่าที่ BMAD ส่งให้ agent มี — ตรวจค่าที่ parse แล้วด้วย
     hidden += [f"{dotted(path)} U+{ord(ch):04X}" for path, ch in _hidden_in_values(data or {})][:MAX_LISTED]
-    if not hidden:
-        return path_issues(data or {})
+    issues = path_issues(data or {})
     if hidden:
-        return [issue("hidden_characters", "มีอักขระที่มองไม่เห็นหรือสลับทิศการแสดงผล (เช่น zero-width, bidi, tag) — "
-                                           "ผู้ตรวจ diff มองไม่เห็นข้อความจริง ลบออกก่อนบันทึก", keys=hidden)]
-    return []
+        issues.insert(0, issue("hidden_characters", "มีอักขระที่มองไม่เห็นหรือสลับทิศการแสดงผล (เช่น zero-width, bidi, tag) "
+                                                    "— ผู้ตรวจ diff มองไม่เห็นข้อความจริง ลบออกก่อนบันทึก", keys=hidden))
+    return issues
 
 
 # -- leaf ของ TOML + การจัดชั้น impact --------------------------------------------------------------
@@ -253,7 +275,7 @@ def classify(rel: str, current: bytes | None, proposed: bytes | None) -> tuple[s
     script ล้ม), สร้าง/ลบไฟล์ และไฟล์ที่ parse ไม่ได้.
     """
     if any(raw is not None and len(raw) > MAX_CUSTOM_BYTES for raw in (current, proposed)):
-        return "high", [issue("prompt_text_change", "ไฟล์ใหญ่เกินเพดาน — ถือว่าเปลี่ยนข้อความทั้งก้อน")]
+        return "high", [issue("bmad_custom_too_large", "ไฟล์ใหญ่เกินเพดาน — ถือว่าเปลี่ยนข้อความทั้งก้อน")]
     parsed: list[dict[str, Any]] = []
     for raw in (current, proposed):
         if raw is None:
@@ -289,17 +311,28 @@ def classify(rel: str, current: bytes | None, proposed: bytes | None) -> tuple[s
 #: placeholder ที่ขึ้นต้น path ได้ — ทุกตัวชี้ในโฟลเดอร์ veda/skill (BMAD แทนค่าเป็น path ใต้ project root)
 ROOT_PLACEHOLDERS = frozenset({"project-root", "skill-root", "planning_artifacts", "implementation_artifacts",
                                "output_folder", "project_knowledge"})
-#: placeholder กลาง path ที่ BMAD แทนด้วยชื่อ (ไม่ใช่ path) — ใช้ได้ในชื่อไฟล์/โฟลเดอร์
-NAME_PLACEHOLDERS = frozenset({"project_name", "date", "topic_slug", "slug", "research_type", "spec_file"})
-_PATH_KEY = re.compile(r"(path|dir|folder|template|file|filename|pattern|artifacts|knowledge|examples)$")
+#: placeholder กลาง path ที่ BMAD แทนด้วย "ชื่อ" (ไม่ใช่ path) — ค่าของ key ที่ชื่อลงท้าย ``name`` ถูกตรวจด้วยกฎชื่อด้วย
+#: (``project_name = "../.."`` ใน config = error) — ``spec_file`` เป็น path จึงไม่อยู่ในรายการ (rework review)
+NAME_PLACEHOLDERS = frozenset({"project_name", "date", "topic_slug", "slug", "research_type"})
+#: key ที่ค่าเป็น path/ชื่อไฟล์ — ตรวจเมื่อค่า "หน้าตาเป็น path" (มี / \ ~ % $ .. หรือไดรฟ์) เพื่อไม่ชน template ข้อความ
+_PATH_KEY = re.compile(r"(paths?|dirs?|folders?|templates?|files?|filenames?|patterns?|artifacts|knowledge|examples|"
+                       r"theme|methods|name|names|location)$")
 _FACT_PREFIX = re.compile(r"file:", re.IGNORECASE)
 _PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
-_SEGMENT_CHAR = re.compile(r"[\w.\-*?]", re.UNICODE)
+_DEVICE = re.compile(r"(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9]|CONIN\$|CONOUT\$)", re.IGNORECASE)
+_PATHISH = re.compile(r"[/\\~%$]|\.\.|^[A-Za-z]:")
+
+
+def _segment_char_ok(ch: str) -> bool:
+    if ch.isascii():
+        return ch.isalnum() or ch in "._-*?"
+    return unicodedata.category(ch)[0] in "LMN"  # ชื่อภาษาไทยมีสระ/วรรณยุกต์ (Mn)
 
 
 def _path_problem(raw: str) -> str | None:
     """เหตุผลที่ path ไม่ผ่าน (None = ผ่าน): หลัง NFKC ต้องเป็น path สัมพัทธ์ หรือ ``{root-placeholder}/<สัมพัทธ์>``;
-    ห้าม ``~ % $``, ไดรฟ์, absolute, UNC, ``..``/``.``, ส่วนที่ลงท้ายด้วยจุด/ช่องว่าง, placeholder ที่ไม่รู้จัก."""
+    ห้าม ``~ % $``, ไดรฟ์, absolute, UNC, ``..``/``.``, ส่วนที่ลงท้ายด้วยจุด/ช่องว่าง, ชื่ออุปกรณ์ (CON, NUL …),
+    placeholder ที่ไม่รู้จัก."""
     value = unicodedata.normalize("NFKC", raw).strip().replace("\\", "/")
     if not value:
         return None
@@ -320,27 +353,43 @@ def _path_problem(raw: str) -> str | None:
             if name.lower() not in NAME_PLACEHOLDERS:
                 return "placeholder"
         stripped = _PLACEHOLDER.sub("x", part)
-        if any(not _SEGMENT_CHAR.fullmatch(ch) for ch in stripped):
+        if _DEVICE.fullmatch(stripped.split(".")[0]):
+            return "device_name"
+        if any(not _segment_char_ok(ch) for ch in stripped):
             return "character"
     return None
 
 
+def _strings(value: Any, path: tuple[str, ...]) -> list[tuple[tuple[str, ...], str]]:
+    """ทุก string ใต้ค่า (ลงไปใน list และ table ใน list — array of tables) พร้อม path ของ key ที่ถือไว้."""
+    if isinstance(value, str):
+        return [(path, value)]
+    if isinstance(value, Mapping):
+        out: list[tuple[tuple[str, ...], str]] = []
+        for key, inner in value.items():
+            out += _strings(inner, (*path, str(key)))
+        return out
+    if isinstance(value, list):
+        return [pair for item in value for pair in _strings(item, path)]
+    return []
+
+
 def path_values(data: Mapping[str, Any]) -> list[tuple[str, str]]:
-    """(ตำแหน่ง, path) ทุกค่าที่ BMAD โหลดเป็น path: key ชื่อแบบ *path/dir/folder/template/file/pattern/... และ
-    รายการ ``file:`` ใน persistent_facts (ตรวจ prefix แบบไม่สนตัวพิมพ์หลัง NFKC)."""
+    """(ตำแหน่ง, path) ทุกค่าที่ BMAD อาจโหลดเป็นไฟล์/โฟลเดอร์ (rework review — ทั้ง class):
+
+    - **ทุก** string ที่ขึ้นต้น ``file:`` (ไม่สนตัวพิมพ์ หลัง NFKC, ข้ามช่องว่างหน้า) ใน key ใดก็ได้ ทุกระดับ
+      รวม array และ array of tables (``review_guidance``, ``doc_standards``, ``style_guide``, ``pack`` …)
+    - string ของ key ชื่อแบบ path/ชื่อไฟล์ (:data:`_PATH_KEY`) ที่หน้าตาเป็น path
+    """
     out: list[tuple[str, str]] = []
-    for path, value in leaves(data).items():
+    for path, item in _strings(data, ()):
+        norm = unicodedata.normalize("NFKC", item).lstrip()
+        if _FACT_PREFIX.match(norm):
+            out.append((dotted(path), norm[len("file:"):]))
+            continue
         key = _norm_key(path[-1]) if path else ""
-        items = value if isinstance(value, list) else [value]
-        for item in items:
-            if not isinstance(item, str):
-                continue
-            norm = unicodedata.normalize("NFKC", item).lstrip()
-            if key == "persistentfacts":
-                if _FACT_PREFIX.match(norm):
-                    out.append((dotted(path), norm[len("file:"):]))
-            elif _PATH_KEY.search(key):
-                out.append((dotted(path), item))
+        if _PATH_KEY.search(key) and _PATHISH.search(norm):
+            out.append((dotted(path), item))
     return out
 
 
