@@ -342,9 +342,83 @@ def test_outside_surface_is_rechecked_at_commit(studio: Studio, root: Path) -> N
     assert data["errors"] == []  # ตอน preview อยู่ใน surface
     customize.write_text(customize.read_text(encoding="utf-8").replace("new_field = 0\n", ""), encoding="utf-8")
     response = studio.commit(data, typed="bmad-build.toml")
-    assert response.status_code == 422
-    assert response.json()["details"]["errors"][0]["code"] == "override_outside_surface_unconfirmed"
+    # ชุด key นอก surface โตกว่าที่แสดงใน preview → 409 ack_stale (ผูกกับชุดที่แสดง, review 6-3 N2)
+    assert response.status_code == 409 and response.json()["code"] == "ack_stale"
+    assert response.json()["details"]["keys"] == ["workflow.new_field"]
     assert not (root / TEAM).exists()
+
+
+@needs_uv
+def test_acknowledgement_covers_only_the_keys_shown(studio: Studio, root: Path) -> None:
+    customize = root / CUSTOMIZE
+    customize.write_text(customize.read_text(encoding="utf-8").replace("strict = true\n", "strict = true\nb = 0\n"),
+                         encoding="utf-8")
+    text = "[workflow]\na = 1\nb = 1\n"
+    data = preview(studio, TEAM, {"text": text, "acknowledged": ["override_outside_surface"]}, None).json()["data"]
+    assert next(w for w in data["warnings"] if w["code"] == "override_outside_surface")["keys"] == ["workflow.a"]
+    customize.write_text(customize.read_text(encoding="utf-8").replace("b = 0\n", ""), encoding="utf-8")
+    response = studio.commit(data, typed="bmad-build.toml")
+    assert response.status_code == 409 and response.json()["details"]["keys"] == ["workflow.b"]
+
+
+@needs_uv
+@pytest.mark.parametrize("kind", ["text", "revert"])
+def test_outside_surface_needs_ack_through_text_and_revert_too(studio: Studio, root: Path, kind: str) -> None:
+    text = "[workflow]\nnot_a_field = 1\n"
+    if kind == "text":
+        payload, base = {"text": text}, None
+    else:
+        created = preview(studio, TEAM, {"text": text, "acknowledged": ["override_outside_surface"]}, None).json()["data"]
+        entry = studio.commit(created, typed="bmad-build.toml").json()["data"]
+        edited = preview(studio, TEAM, {"text": "[workflow]\nmax_rounds = 9\n"}, file_sha(root, TEAM)).json()["data"]
+        entry2 = studio.commit(edited, typed="bmad-build.toml").json()["data"]
+        assert entry["change_id"] != entry2["change_id"]
+        payload, base = {"change_id": entry2["change_id"]}, file_sha(root, TEAM)
+    data = preview(studio, TEAM, payload, base, kind=kind).json()["data"]
+    assert "override_outside_surface_unconfirmed" in [e["code"] for e in data["errors"]]
+    assert studio.commit(data, typed="bmad-build.toml").status_code == 422
+    acked = preview(studio, TEAM, {**payload, "acknowledged": ["override_outside_surface"]}, base, kind=kind).json()["data"]
+    assert acked["errors"] == [], acked["errors"]
+    assert studio.commit(acked, typed="bmad-build.toml").status_code == 200
+
+
+@needs_uv
+def test_customize_toml_removed_before_commit_is_refused(studio: Studio, root: Path) -> None:
+    data = preview(studio, TEAM, {"set": [{"path": ["workflow", "max_rounds"], "value": 4}]}, None).json()["data"]
+    assert data["errors"] == []
+    (root / CUSTOMIZE).unlink()
+    response = studio.commit(data, typed="bmad-build.toml")
+    assert response.status_code == 403 and response.json()["details"]["reason"] == "kind_target"
+    assert not (root / TEAM).exists()
+
+
+@needs_uv
+def test_override_resolver_runs_again_at_commit(studio: Studio, root: Path) -> None:
+    """ชั้น personal เปลี่ยนหลัง preview จน merge ล้ม — commit ต้องไม่เขียน (review 6-3 N5)."""
+    data = preview(studio, TEAM, {"text": '[[workflow.review_layers]]\nid = "extra"\nname = "x"\n'}, None).json()["data"]
+    assert data["errors"] == []
+    (root / USER).write_text('[[workflow.review_layers]]\nid = 7\n', encoding="utf-8")
+    response = studio.commit(data, typed="bmad-build.toml")
+    assert response.status_code == 422 and response.json()["details"]["errors"][0]["code"] == "bmad_resolve_failed"
+    assert not (root / TEAM).exists()
+
+
+def test_transient_bmad_failures_are_not_cached(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from bmad_studio.adapters.bmad import BmadScripts, BmadUnavailable
+    from bmad_studio.core.paths import VedaPaths
+
+    scripts = BmadScripts(VedaPaths(root))
+    calls: list[int] = []
+
+    def flaky(self, skill, root_dir):
+        calls.append(1)
+        raise BmadUnavailable("uv_missing", "x")
+
+    monkeypatch.setattr(BmadScripts, "_run_customization", flaky)
+    for _ in range(2):
+        with pytest.raises(BmadUnavailable):
+            scripts.resolve_customization_with("bmad-build", TEAM, b"[workflow]\n")
+    assert len(calls) == 2
 
 
 @needs_uv

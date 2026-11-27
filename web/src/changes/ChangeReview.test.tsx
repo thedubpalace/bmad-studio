@@ -137,6 +137,27 @@ describe("ChangeReview", () => {
     });
   }
 
+  it("keys outside the surface (any kind, e.g. revert) are acknowledged here and the preview is reopened", async () => {
+    const blocked = preview({
+      path: "_bmad/custom/bmad-build.toml", kind: "revert", confirm_phrase: "bmad-build.toml",
+      warnings: [{ code: "override_outside_surface", error: "นอก surface", keys: ["workflow.extra"] }],
+      errors: [{ code: "override_outside_surface_unconfirmed", error: "ยืนยันก่อน" }],
+    });
+    pend(blocked);
+    const fresh = { ...blocked, preview_id: "b".repeat(32), errors: [] };
+    fetchMock.mockResolvedValueOnce(json(200, { ok: true, data: fresh }));
+    await render();
+    const box = container.querySelector("#review-outside")!.closest("section")!;
+    expect(box.textContent).toContain("workflow.extra");
+    const ack = Array.from(box.querySelectorAll("button")).find((b) => b.textContent?.includes("ยืนยัน key"))!;
+    await act(async () => ack.click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.payload).toEqual({ text: "x", acknowledged: ["override_outside_surface"] });
+    expect(getPending()?.preview.preview_id).toBe("b".repeat(32));
+    expect(container.querySelector("#review-outside")).toBeNull();
+  });
+
   it("config preview shows the effective-after-save panel, hidden-count note and warning keys", async () => {
     pend(preview({
       path: "_bmad/custom/config.toml", kind: "config", confirm_phrase: "config.toml",

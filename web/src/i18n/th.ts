@@ -465,6 +465,7 @@ export const th = {
     outsideTitle: "มี key นอกพื้นผิวที่ปรับได้",
     outsideBody: "BMAD อาจไม่ใช้ค่าเหล่านี้ หรือ skill อาจตีความต่างไป:",
     outsideAck: "ยืนยันว่าตั้งใจใส่ key เหล่านี้",
+    outsideAckRefresh: "ยืนยัน key เหล่านี้แล้วเปิดตัวอย่างใหม่",
     existingOutside: (keys: string) => `ไฟล์นี้มี key นอกพื้นผิวอยู่แล้ว (${keys}) — ดู/แก้ในโหมดข้อความ`,
     effectiveTitle: "ผลหลัง merge (ตอนนี้)",
     effectiveHint: (file: string) => `ค่าที่ใช้อยู่ตอนนี้จาก resolve_customization.py ของ BMAD — ค่าหลังบันทึก ${file} อยู่ในหน้าตรวจการเปลี่ยนแปลง`,

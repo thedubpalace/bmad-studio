@@ -150,7 +150,7 @@ def file_facts(data: Mapping[str, Any]) -> list[str]:
 
 def _outside_issue(keys: list[str]) -> Issue:
     return cfg.issue(ACK_OUTSIDE, "มี key ที่ไม่อยู่ในพื้นผิวที่ skill นี้เปิดให้ปรับ (customize.toml) — BMAD อาจไม่ใช้ค่าเหล่านี้ "
-                                  "หรือ skill อาจตีความต่างไป ยืนยันก่อนบันทึก", keys=keys[:cfg.MAX_LISTED])
+                                  "หรือ skill อาจตีความต่างไป ยืนยันก่อนบันทึก", keys=keys[:200])
 
 
 def advisory(scripts: BmadScripts) -> Any:
@@ -268,14 +268,11 @@ class OverrideKind:
         proposed, encode_warnings = cfg.encode_for_bmad(current, text)
         errors: list[Issue] = []
         view: dict[str, Any] | None = None
-        data, problem = cfg.parse_bytes(proposed)
-        if problem is None:
-            surface = load_surface(self.scripts, skill) or {}
-            if outside_surface(surface, data) and ACK_OUTSIDE not in acknowledged:
-                errors.append(cfg.issue("override_outside_surface_unconfirmed",
-                                        "มี key นอกพื้นผิวที่ปรับได้ — ยืนยันคำเตือนก่อนบันทึก"))
+        # key นอก surface → pipeline ตรวจ/บังคับยืนยันให้ทุก kind (advisory + acknowledged + ack_scope)
+        # ตรวจถูก ๆ ก่อน (TOML, อักขระซ่อน, path) — ไม่รัน resolver (subprocess) กับไฟล์ที่ไม่ผ่านอยู่แล้ว (review N4)
+        if not cfg.validate_toml(proposed):
             try:
-                after = self.scripts.resolve_customization_with(skill, target.rel, proposed)
+                after = self.scripts.resolve_customization_with(skill, override_rel(skill, _layer_name), proposed)
                 try:
                     before: dict[str, Any] | None = self.scripts.resolve_customization(skill)
                 except BmadUnavailable:

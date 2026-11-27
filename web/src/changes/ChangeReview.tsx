@@ -10,6 +10,7 @@ import { EmptyState } from "../components/EmptyState";
 import { Icon } from "../components/Icon";
 import { th } from "../i18n/th";
 import {
+  acknowledgeAndRefresh,
   clearPending,
   commitPending,
   hasUnsavedChange,
@@ -154,6 +155,34 @@ function EffectivePanel({ preview }: { preview: ChangePreview }) {
   );
 }
 
+const OUTSIDE = "override_outside_surface";
+
+/** key นอก surface ที่ยังไม่ได้ยืนยัน (ทุก kind รวม revert) — ยืนยันแล้วเปิดตัวอย่างใหม่ */
+function OutsideAck({ preview }: { preview: ChangePreview }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!(preview.errors ?? []).some((e) => e.code === `${OUTSIDE}_unconfirmed`)) return null;
+  const keys = (preview.warnings ?? []).find((w) => w.code === OUTSIDE)?.keys ?? [];
+  return (
+    <section className="issue-box issue-box--warn" aria-labelledby="review-outside">
+      <h3 id="review-outside" className="issue-box__title"><Icon name="alert" size={18} /> {th.override.outsideTitle}</h3>
+      <p>{th.override.outsideBody}</p>
+      <span className="issue-keys">{keys.map((k) => <code key={k} className="mono issue-keys__key">{k}</code>)}</span>
+      <button type="button" className="button button--secondary" aria-disabled={busy}
+              onClick={() => {
+                if (busy) return;
+                setBusy(true);
+                setFailed(null);
+                acknowledgeAndRefresh(OUTSIDE).catch((cause) => setFailed(cause instanceof ApiError ? cause.message : th.errors.unexpected))
+                  .finally(() => setBusy(false));
+              }}>
+        {th.override.outsideAckRefresh}
+      </button>
+      {failed ? <p className="form-error" role="alert">{failed}</p> : null}
+    </section>
+  );
+}
+
 function ReviewStep({ pending, onNext }: { pending: PendingChange; onNext: () => void }) {
   const navigate = useNavigate();
   const wide = useMedia(WIDE);
@@ -169,6 +198,7 @@ function ReviewStep({ pending, onNext }: { pending: PendingChange; onNext: () =>
     <>
       <Summary preview={preview} />
       <Issues preview={preview} />
+      <OutsideAck preview={preview} />
       <EffectivePanel preview={preview} />
       <div className="diff-toolbar" role="group" aria-label={th.review.viewLabel}>
         <div className="segmented">

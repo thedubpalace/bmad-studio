@@ -78,6 +78,19 @@ export async function refreshPreview(): Promise<void> {
   emit({ ...current, preview, outcome: { kind: "idle" } });
 }
 
+/** ยืนยันคำเตือน (เช่น key นอก surface ของ override) แล้วเปิด preview ใหม่ด้วย request เดิม + ``acknowledged`` —
+ *  server ผูกการยืนยันกับชุดที่แสดงใน preview ใหม่นี้ (ack_scope) */
+export async function acknowledgeAndRefresh(code: string): Promise<void> {
+  const current = pending;
+  if (!current) return;
+  const payload = (current.request.payload ?? {}) as Record<string, unknown>;
+  const prior = Array.isArray(payload.acknowledged) ? (payload.acknowledged as string[]) : [];
+  const request = { ...current.request, payload: { ...payload, acknowledged: Array.from(new Set([...prior, code])) } };
+  const preview = await api.post<ChangePreview>("/api/changes/preview", request);
+  if (pending !== current) return;
+  emit({ ...current, request, preview, outcome: { kind: "idle" } });
+}
+
 let inflight: Promise<void> | null = null;
 
 /** code ของ 503 ที่ server ของแอปส่งเมื่อยืนยันว่าไม่มีอะไรถูกเปลี่ยน (core.writes / access_guard / routes) */

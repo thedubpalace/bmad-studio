@@ -40,6 +40,9 @@ VALIDATED_RULES = FLOW_RULES | frozenset({"claude-md"})
 #: rule ที่ลบได้โดยไม่ต้องมี delete validator (ลบ overlay = กลับไปใช้ default ที่ตรวจแล้ว)
 DELETE_WITHOUT_VALIDATOR = frozenset({"flow-project"})
 
+#: คำเตือน key นอกพื้นผิวของ override (story 6-3) — ทุก kind ต้องยืนยันด้วย ``payload.acknowledged``
+ACK_OUTSIDE = "override_outside_surface"
+ACK_OUTSIDE_UNCONFIRMED = "override_outside_surface_unconfirmed"
 TOKEN_TTL_SECONDS = 10 * 60
 HISTORY_LIMIT = 500
 MAX_PREVIEWS = 200  # preview ที่ยังไม่หมดอายุทั้งระบบ (ผู้ใช้เดียว); เกิน = 429 ไม่ไล่ของเดิมทิ้ง
@@ -295,10 +298,22 @@ class WritePipeline:
         return []
 
     @staticmethod
-    def _ack_scope(advice: list[dict[str, str]]) -> list[str]:
+    def _ack_scope(advice: list[dict[str, Any]]) -> list[str]:
+        """ชุดที่การยืนยันครอบคลุม: โปรเจกต์ที่ ux จะถูกปิด (A3) + key นอก surface ของ override (``outside:<key>``,
+        review 6-3 N1/N2) — commit ใต้ lock ปฏิเสธถ้าชุดโตกว่าที่แสดงใน preview."""
         from bmad_studio.core.flow.ux_guard import ack_scope
 
-        return ack_scope(advice)
+        outside = sorted({f"outside:{k}" for w in advice if w.get("code") == ACK_OUTSIDE for k in (w.get("keys") or [])})
+        return ack_scope(advice) + outside
+
+    @staticmethod
+    def _acknowledged(request: ChangeRequest) -> list[str]:
+        value = request.payload.get("acknowledged") if isinstance(request.payload, Mapping) else None
+        if value is None:
+            return []
+        if not isinstance(value, list) or len(value) > 8 or not all(isinstance(v, str) and len(v) <= 64 for v in value):
+            raise StudioError("invalid_request", "payload.acknowledged ต้องเป็นรายการ code ของคำเตือน", 422)
+        return value
 
     def _impact(self, guarded: GuardedPath, current: bytes | None,
                 proposed: bytes | None) -> tuple[str, list[dict[str, Any]]]:
@@ -359,6 +374,14 @@ class WritePipeline:
         advisory = self.advisories.get(guarded.rule)
         advice = list(advisory(guarded.rel, proposal.proposed)) if advisory is not None else []
         impact, impact_warnings = self._impact(guarded, current.raw if current.exists else None, proposal.proposed)
+        extra = dict(proposal.extra)
+        if any(w.get("code") == ACK_OUTSIDE for w in advice):
+            # key นอก surface ต้องยืนยันทุก kind (override, text, revert) — ไม่ใช่แค่ kind ที่ตรวจเอง (review 6-3 N1)
+            acknowledged = list(extra.get("acknowledged") or self._acknowledged(request))
+            extra["acknowledged"] = acknowledged
+            if ACK_OUTSIDE not in acknowledged:
+                errors.append({"code": ACK_OUTSIDE_UNCONFIRMED,
+                               "error": "มี key นอกพื้นผิวที่ปรับได้ (customize.toml) — ยืนยันคำเตือนก่อนบันทึก"})
         errors = _dedupe(errors)
         warnings = _dedupe(list(proposal.warnings) + advice + impact_warnings)
         if diff.get("truncated"):
@@ -376,7 +399,7 @@ class WritePipeline:
             "preview_id": preview_id, "kind": request.kind, "rel": guarded.rel, "rule": guarded.rule,
             "op": "delete" if delete else "modify" if current.exists else "create",
             "base_sha256": current.sha256, "proposed_sha256": _sha(proposal.proposed),
-            "extra": proposal.extra,
+            "extra": extra,
             "impact": impact, "confirm_phrase": confirm_phrase(guarded),
             "errors": errors, "warnings": warnings, "added": diff["added"], "removed": diff["removed"],
             # ชุดโปรเจกต์ที่คำเตือน ux ใน preview นี้แสดง — การยืนยันครอบคลุมเฉพาะชุดนี้ (retro epic-4 A3)
@@ -448,18 +471,26 @@ class WritePipeline:
 
                 advice = self.advisories[guarded.rule](guarded.rel, None if delete else proposed)
                 grown = scope_grew(list(meta.get("ack_scope") or []), self._ack_scope(advice))
+                grown_keys = [g[len("outside:"):] for g in grown if g.startswith("outside:")]
+                if grown_keys:
+                    raise StudioError(
+                        "ack_stale",
+                        "key นอกพื้นผิวที่ปรับได้เปลี่ยนไปหลังตัวอย่าง (customize.toml ถูกแก้) — ไม่มีอะไรถูกเขียน "
+                        "เปิดตัวอย่างใหม่แล้วยืนยันอีกครั้ง", 409, {"keys": grown_keys})
                 if grown:
                     raise StudioError(
                         "ux_ack_stale",
                         "รายชื่อโปรเจกต์ที่การแก้นี้จะปิดขั้นออกแบบ UI เปลี่ยนไปหลังตัวอย่าง — ไม่มีอะไรถูกเขียน "
                         "เปิดตัวอย่างใหม่แล้วยืนยันอีกครั้ง", 409, {"projects": grown})
+                acknowledged = list(extra.get("acknowledged") or [])
                 if "acknowledged" in extra:
-                    acknowledged = list(extra.get("acknowledged") or [])
                     late = ack_errors(advice, acknowledged)
-                    if any(w.get("code") == "override_outside_surface" for w in advice) \
-                            and "override_outside_surface" not in acknowledged:
-                        late = late + [{"code": "override_outside_surface_unconfirmed",
-                                        "error": "มี key นอกพื้นผิวที่ปรับได้ (customize.toml เปลี่ยนหลังตัวอย่าง) — เปิดตัวอย่างใหม่"}]
+                if any(w.get("code") == ACK_OUTSIDE for w in advice) and ACK_OUTSIDE not in acknowledged:
+                    late = list(late) + [{"code": ACK_OUTSIDE_UNCONFIRMED,
+                                          "error": "มี key นอกพื้นผิวที่ปรับได้ (customize.toml เปลี่ยนหลังตัวอย่าง) — เปิดตัวอย่างใหม่"}]
+            check_target = getattr(self.kinds.get(str(meta.get("kind"))), "check_target", None)
+            if check_target is not None:
+                check_target(guarded)  # เป้าของ kind ยังใช้ได้ (เช่น skill ยังมี customize.toml) — review 6-3 N3
             if not late and meta.get("impact") != "high" and self._impact(guarded, original, None if delete else proposed)[0] == "high":
                 # impact ตามเนื้อหาต้องไม่สูงกว่าที่ผู้ใช้ยืนยันไว้ (กันข้าม typed confirmation)
                 raise StudioError("impact_changed", "การแก้นี้ต้องยืนยันแบบพิมพ์ชื่อไฟล์ — เปิดตัวอย่างใหม่", 409)
