@@ -40,6 +40,9 @@ CONFIG_TARGETS: Mapping[str, str] = {CONFIG_TEAM: "team", CONFIG_USER: "user"}
 #: key ของ customization ที่เป็น "คำสั่งที่ agent รันตอนเริ่ม skill" — เทียบแบบไม่สนตัวพิมพ์/ตัวคั่น
 ACTIVATION_KEYS = frozenset({"activationstepsprepend", "activationstepsappend", "persistentfacts"})
 MAX_EDITS = 100
+#: เพดานขนาดไฟล์ใน ``_bmad/custom`` (review 6-1 N5 / rework DoS): tomlkit + diff + resolver เป็นเชิงเส้นและช้า
+#: (547 KB = 10 วินาที/preview) — ไฟล์จริงมีไม่กี่ร้อย byte; ตรวจก่อน parse ทุกครั้ง
+MAX_CUSTOM_BYTES = 128 * 1024
 MAX_VALUE_CHARS = 64 * 1024
 MAX_PATH_DEPTH = 8
 MAX_LISTED = 10
@@ -126,9 +129,23 @@ def _hidden_in_values(data: Any, path: tuple[str, ...] = ()) -> list[tuple[tuple
     return out
 
 
+def too_large() -> StudioError:
+    return StudioError("bmad_custom_too_large", f"ไฟล์ใน _bmad/custom ใหญ่เกิน {MAX_CUSTOM_BYTES // 1024} KiB — "
+                                                "แก้ด้วยมือหรือแยกไฟล์ให้เล็กลง", 413)
+
+
+def check_size(current: fs.TextDoc, payload: Mapping[str, Any]) -> None:
+    """ก่อนงานแพง (tomlkit/diff/resolver): ไฟล์เดิมหรือข้อความที่ส่งมาใหญ่เกินเพดาน = 413."""
+    text = payload.get("text") if isinstance(payload, Mapping) else None
+    if len(current.raw) > MAX_CUSTOM_BYTES or (isinstance(text, str) and len(text) > MAX_CUSTOM_BYTES):
+        raise too_large()
+
+
 def validate_toml(proposed: bytes) -> list[Issue]:
     """file validator ของ rule ``bmad-custom`` (ทุก kind รวม revert/text): TOML ที่ BMAD อ่านได้ และไม่มีอักขระที่
     มองไม่เห็น/สลับทิศ (review 6-3: ข้อความที่ agent อ่านต้องเห็นครบใน diff ก่อนยืนยัน)."""
+    if len(proposed) > MAX_CUSTOM_BYTES:  # ทุก kind รวม text/revert — ก่อน parse
+        return [issue("bmad_custom_too_large", f"ไฟล์ใน _bmad/custom ใหญ่เกิน {MAX_CUSTOM_BYTES // 1024} KiB")]
     data, problem = parse_bytes(proposed)
     if problem:
         return [problem]
@@ -235,6 +252,8 @@ def classify(rel: str, current: bytes | None, proposed: bytes | None) -> tuple[s
     เปลี่ยนชนิด (เช่น ``principles = false`` ทับข้อความของ installer/skill ตอน merge), comment (agent อ่านไฟล์ดิบเมื่อ
     script ล้ม), สร้าง/ลบไฟล์ และไฟล์ที่ parse ไม่ได้.
     """
+    if any(raw is not None and len(raw) > MAX_CUSTOM_BYTES for raw in (current, proposed)):
+        return "high", [issue("prompt_text_change", "ไฟล์ใหญ่เกินเพดาน — ถือว่าเปลี่ยนข้อความทั้งก้อน")]
     parsed: list[dict[str, Any]] = []
     for raw in (current, proposed):
         if raw is None:
@@ -610,6 +629,7 @@ class ConfigKind:
 
     def propose(self, target: GuardedPath, current: fs.TextDoc, payload: Mapping[str, Any]) -> Proposal:
         self.check_target(target)
+        check_size(current, payload)
         text, warnings = proposed_text(current, payload)
         proposed, encode_warnings = encode_for_bmad(current, text)
         view: dict[str, Any] | None = None

@@ -158,8 +158,8 @@ def advisory(scripts: BmadScripts) -> Any:
     และรายการ ``file:`` ใน persistent_facts (เนื้อไฟล์ที่ glob ชี้จะกลายเป็น fact ของ agent — diff ไม่แสดง)."""
     def check(rel: str, proposed: bytes | None) -> list[Issue]:
         target = target_of(rel.lower())
-        if target is None or proposed is None:
-            return []
+        if target is None or proposed is None or len(proposed) > cfg.MAX_CUSTOM_BYTES:
+            return []  # ใหญ่เกินเพดาน = error ของ validator อยู่แล้ว — ไม่ parse
         try:
             surface = load_surface(scripts, target[0])
         except (OSError, StudioError):
@@ -264,6 +264,7 @@ class OverrideKind:
         acknowledged = payload.get("acknowledged", [])
         if not isinstance(acknowledged, list) or acknowledged not in ([], [ACK_OUTSIDE]):
             raise StudioError("invalid_request", "payload.acknowledged ต้องเป็น [] หรือ [\"override_outside_surface\"]", 422)
+        cfg.check_size(current, payload)
         text, warnings = cfg.proposed_text(current, payload)
         proposed, encode_warnings = cfg.encode_for_bmad(current, text)
         errors: list[Issue] = []

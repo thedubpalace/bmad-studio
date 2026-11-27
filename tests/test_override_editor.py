@@ -463,3 +463,37 @@ def test_override_comment_digit_or_bool_edit_is_high(studio: Studio, root: Path,
     data = preview(studio, TEAM, {"text": new}, file_sha(root, TEAM)).json()["data"]
     assert data["impact"] == "high"
     assert studio.commit(data).status_code == 400
+
+
+# -- rework round 1: DoS — เพดานขนาด _bmad/custom ------------------------------------------------------
+
+def _big(n: int) -> str:
+    return "[workflow]\nmax_rounds = 3\n" + "".join(f'[workflow.t{i}]\nk = "xxxx"\n' for i in range(n))
+
+
+@pytest.mark.parametrize("kind", ["override", "text"])
+def test_oversized_custom_file_is_refused_fast(studio: Studio, root: Path, kind: str) -> None:
+    import time
+
+    big = _big(18000)  # ~550 KB (เดิม 10 วินาที/preview)
+    (root / TEAM).write_text(big, encoding="utf-8", newline="\n")
+    started = time.perf_counter()
+    form = preview(studio, TEAM, {"set": [{"path": ["workflow", "max_rounds"], "value": 4}]}, file_sha(root, TEAM),
+                   kind="override")
+    assert form.status_code == 413 and form.json()["code"] == "bmad_custom_too_large"
+    text = preview(studio, TEAM, {"text": big + "z = 1\n"}, file_sha(root, TEAM), kind=kind)
+    if kind == "override":
+        assert text.status_code == 413
+    else:
+        assert "bmad_custom_too_large" in [e["code"] for e in text.json()["data"]["errors"]]
+    assert time.perf_counter() - started < 5
+
+
+def test_file_just_under_the_cap_is_accepted(studio: Studio, root: Path) -> None:
+    from bmad_studio.core import config_model as cfg
+
+    body = "[workflow]\nmax_rounds = 3\n"
+    body += "#" * (cfg.MAX_CUSTOM_BYTES - len(body) - 2) + "\n"
+    assert len(body.encode()) <= cfg.MAX_CUSTOM_BYTES
+    assert cfg.validate_toml(body.encode()) == []
+    assert [i["code"] for i in cfg.validate_toml(body.encode() + b"x = 1\n")] == ["bmad_custom_too_large"]
