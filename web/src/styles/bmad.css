@@ -388,3 +388,10 @@
   border-radius: 999px;
   padding: 2px var(--s-2);
 }
+
+/* แท็บ (role=tab) ใช้ aria-selected แทน aria-pressed */
+.segmented__item[aria-selected="true"] {
+  background: var(--surface-solid-2);
+  color: var(--text);
+  font-weight: 600;
+}
