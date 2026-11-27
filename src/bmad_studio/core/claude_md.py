@@ -46,9 +46,10 @@ DEFAULT_RESOLVER_PROJECT = "C:/Users/thedu/code/bmad-studio"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-#: อักขระ ASCII ที่ path ของ repo มีได้ (allowlist, retro epic-5 item 4) — นอกนี้ห้ามหมด รวม tab, ``%`` (ตัวแปรของ cmd),
-#: ``!``/``^`` (cmd), ``*?[]{}`` (glob), quote/backtick, ``$&;|<>`` และช่องว่างอื่นนอกจาก space ธรรมดา
-_PROJECT_ASCII = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /\\:._-~()+@,")
+#: อักขระ ASCII ที่ path ของ repo มีได้ (allowlist, retro epic-5 item 4 + review 5-2 follow-up N1) — ตัวอักษร ตัวเลข
+#: space และ ``/ \ : . _ -`` เท่านั้น: ``( ) @`` เป็น subexpression/array ของ PowerShell (``C:/a(calc)`` รัน calc),
+#: ``,`` แยก argument, ``~ +`` ไม่จำเป็น; นอกนี้ห้ามหมด รวม tab, ``% ! ^ * ? [ ] { }``, quote/backtick, ``$&;|<>``
+_PROJECT_ASCII = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 /\\:._-")
 #: อักขระที่ไม่ใช่ ASCII รับเฉพาะตัวอักษร/เครื่องหมายกำกับ/ตัวเลข (เช่น ชื่อโฟลเดอร์ภาษาไทย) — ไม่รับ Z*/C*/สัญลักษณ์
 _PROJECT_UNICODE_CATEGORIES = ("L", "M", "N")
 MAX_RESOLVER_PROJECT = 260
@@ -64,23 +65,24 @@ def check_resolver_project(project: str) -> str:
     """ค่าของ ``resolver_project`` ที่จะเขียนลง CLAUDE.md/agent (เป็นส่วนหนึ่งของคำสั่งที่ agent รัน).
 
     allowlist ทีละอักขระบนค่าดิบ (ก่อนตัดช่องว่างหัวท้าย — ``str.strip()`` ตัด tab/U+2028 ทิ้งเงียบ ๆ): ตัวอักษร ตัวเลข
-    space ธรรมดา และ ``/ \\ : . _ - ~ ( ) + @ ,``; ห้ามว่าง ห้ามขึ้นต้นด้วย ``-`` (กลายเป็น option ของ uv) และยาวไม่เกิน
+    space ธรรมดา และ ``/ \\ : . _ -``; ห้ามว่าง ห้ามขึ้นต้นด้วย ``-`` (กลายเป็น option ของ uv) และยาวไม่เกิน
     :data:`MAX_RESOLVER_PROJECT`.
     """
     if not isinstance(project, str) or len(project) > MAX_RESOLVER_PROJECT:
-        raise ValueError("resolver_project ต้องเป็นข้อความยาวไม่เกิน 260 ตัวอักษร")
+        raise ValueError(f"resolver_project ต้องเป็นข้อความยาวไม่เกิน {MAX_RESOLVER_PROJECT} ตัวอักษร")
     bad = next((ch for ch in project if not _project_char_ok(ch)), None)
     value = project.strip(" ").replace("\\", "/")
     if bad is not None or not value or value.startswith("-"):
         raise ValueError("resolver_project ต้องเป็น path ที่ไม่ว่าง ไม่ขึ้นต้นด้วย - และมีเฉพาะตัวอักษร ตัวเลข ช่องว่าง "
-                         "และ / \\ : . _ - ~ ( ) + @ ,")
+                         "และ / \\ : . _ -")
     return value
 
 
 def resolve_prefix(project: str = DEFAULT_RESOLVER_PROJECT) -> str:
-    """รูปมาตรฐานเดียวของคำสั่ง resolver ใน CLAUDE.md/agent — ห้ามใช้ exe ของ entry point (Application Control บล็อก)."""
+    """รูปมาตรฐานเดียวของคำสั่ง resolver ใน CLAUDE.md/agent — ห้ามใช้ exe ของ entry point (Application Control บล็อก).
+    path อยู่ใน double quote เสมอ (review 5-2 follow-up N1) — ทั้ง cmd/PowerShell/bash ไม่ตีความอักขระใน allowlist ข้างใน."""
     path = check_resolver_project(project)
-    return f"uv run --project {f'\"{path}\"' if ' ' in path else path} python -m bmad_studio.cli flow resolve"
+    return f'uv run --project "{path}" python -m bmad_studio.cli flow resolve'
 
 
 def resolve_command(project: str = DEFAULT_RESOLVER_PROJECT) -> str:

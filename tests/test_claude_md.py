@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -24,7 +25,7 @@ from .test_changes_api import Studio
 from .test_flow_resolve import project_dir, registry
 
 R, D = cm.RESOLVER_BLOCK, cm.DISPATCH_BLOCK
-STANDARD = "uv run --project C:/Users/thedu/code/bmad-studio python -m bmad_studio.cli flow resolve <project> [--json]"
+STANDARD = 'uv run --project "C:/Users/thedu/code/bmad-studio" python -m bmad_studio.cli flow resolve <project> [--json]'
 
 SAMPLE = """# Veda — ศูนย์ควบคุม
 
@@ -463,7 +464,7 @@ def test_command_in_block_runs_and_returns_json(settings: Settings) -> None:
     _veda_with_ux_off(root)
     # รันกับ checkout ที่กำลังทดสอบ (worktree/clone อื่น) — รูปของข้อความตรึงด้วย test ข้างบนแล้ว
     command = next(c for c in COMMAND.findall("\n".join(cm.resolver_lines(cm.REPO_ROOT.as_posix()))))
-    argv = command.replace("<project>", "demo").split()
+    argv = shlex.split(command.replace("<project>", "demo"))  # path อยู่ใน quote เสมอ (review 5-2 N1)
     assert argv[:3] == ["uv", "run", "--project"] and "--json" in argv
     env = {**os.environ, "VEDA_ROOT": str(root), "BMAD_STUDIO_VEDA_ROOT": str(root), "PYTHONIOENCODING": "utf-8"}
     out = subprocess.run([shutil.which("uv") or "uv", *argv[1:]], capture_output=True, env=env, timeout=120,

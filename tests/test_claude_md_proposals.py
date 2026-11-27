@@ -287,7 +287,7 @@ def test_resolver_project_comes_from_settings(settings: Settings, monkeypatch: p
     added = "\n".join(line["text"] for h in preview["diff"]["hunks"] for line in h["lines"] if line["type"] == "add")
     assert '--project "D:/other checkout/bmad-studio"' in added
     # ค่าเริ่มต้นไม่ขึ้นกับ checkout ที่รัน (worktree อื่นได้ข้อความเดิม)
-    assert cm.RESOLVE_PREFIX.startswith("uv run --project C:/Users/thedu/code/bmad-studio ")
+    assert cm.RESOLVE_PREFIX.startswith('uv run --project "C:/Users/thedu/code/bmad-studio" ')
 
 
 # -- rework round 1, review layers (ผลจาก blind/edge/verification-gap) -----------------------------------
@@ -406,7 +406,7 @@ def test_unsafe_resolver_project_is_rejected(bad: str) -> None:
 
 
 def test_resolver_project_backslashes_become_slashes() -> None:
-    assert cm.resolve_prefix("C:\\Users\\x\\bmad-studio").startswith("uv run --project C:/Users/x/bmad-studio ")
+    assert cm.resolve_prefix("C:\\Users\\x\\bmad-studio").startswith('uv run --project "C:/Users/x/bmad-studio" ')
 
 
 # -- retro epic-5 item 3: gate detector ครอบคลุมทุกรูปตัวคั่น/ตัวพิมพ์ของ flag *ready --------------------------
@@ -448,6 +448,8 @@ def test_words_that_are_not_other_gates_keep_suggestion(studio: Studio, case: st
     "C:/x\ty", "C:/x\u2028y", "C:/x\u2029y", "C:/x\u00a0y", "C:/x\u3000y", "C:/x\u200by", "C:/x\x0by", "C:/x\x1fy",
     "C:/x\x7fy", "C:/%USERPROFILE%/x", "-C:/x", " -C:/x", "--project=x", "C:/x*", "C:/x?", "C:/x[1]", "C:/x{a}",
     "C:/x!y", "C:/x^y", "\tC:/x", "C:/x\t", "C:/x\u2028", "C:/x\u202ey", "C:/x\ufeffy", "x" * 261,
+    # review 5-2 follow-up N1: PowerShell subexpression/array/argument separator
+    "C:/a(calc)", "C:/a@(calc)", "C:/a,b", "C:/a+b", "C:/~x",
 ])
 def test_resolver_project_allowlist_rejects(bad: str) -> None:
     from pydantic import ValidationError
@@ -461,6 +463,6 @@ def test_resolver_project_allowlist_rejects(bad: str) -> None:
 
 
 @pytest.mark.parametrize("good", ["C:/Users/thedu/code/bmad-studio", "D:/other checkout/bmad-studio",
-                                  "C:/Users/ทดสอบ/bmad-studio", r"C:\x\b_c.d~1(2)+e@f,g", " C:/x "])
+                                  "C:/Users/ทดสอบ/bmad-studio", r"C:\x\b_c.d-1_2", " C:/x "])
 def test_resolver_project_allowlist_accepts(good: str) -> None:
     assert cm.check_resolver_project(good) == good.strip(" ").replace("\\", "/")
